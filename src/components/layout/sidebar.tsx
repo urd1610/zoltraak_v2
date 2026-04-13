@@ -82,7 +82,7 @@ export function Sidebar() {
     >
       <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
         {!isCollapsed && (
-          <span className="text-lg font-bold text-sidebar-foreground">Admin</span>
+          <span className="text-lg font-bold text-sidebar-foreground">zoltraak system</span>
         )}
         <button
           onClick={toggle}

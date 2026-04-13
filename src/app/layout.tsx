@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Zoltraak Admin",
+  title: "zoltraak system",
   description: "Zoltraak管理画面",
 };
 
