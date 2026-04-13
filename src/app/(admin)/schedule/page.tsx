@@ -952,7 +952,9 @@ export default function SchedulePage() {
               {selectedEvent.description && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">説明</p>
-                  <p className="text-sm font-medium">{selectedEvent.description}</p>
+                  <p className="text-sm font-medium whitespace-pre-wrap break-words">
+                    {selectedEvent.description}
+                  </p>
                 </div>
               )}
 
