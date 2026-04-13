@@ -3,14 +3,7 @@
 import { useChatStore } from "@/stores/chat-store";
 import { sortModelsForDisplay } from "@/lib/ai/model-sort";
 import { ModelInfo, ProviderId } from "@/types/ai";
-import { useEffect } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useEffect, useState } from "react";
 
 const defaultModels: Record<ProviderId, { id: string; name: string }[]> = {
   openrouter: [
@@ -47,6 +40,8 @@ function mergeModels(
 }
 
 export function ModelSelector() {
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [hasModelLoadError, setHasModelLoadError] = useState(false);
   const {
     selectedProvider,
     selectedModel,
@@ -61,6 +56,8 @@ export function ModelSelector() {
 
     async function fetchModels() {
       try {
+        setIsLoadingModels(true);
+        setHasModelLoadError(false);
         const res = await fetch(`/api/models?provider=${selectedProvider}`, {
           signal: controller.signal,
         });
@@ -70,7 +67,13 @@ export function ModelSelector() {
         const data = await res.json();
         setAvailableModels(selectedProvider, data.models ?? []);
       } catch {
-        // Keep the current in-memory cache/defaults when fetching fails.
+        if (!controller.signal.aborted) {
+          setHasModelLoadError(true);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingModels(false);
+        }
       }
     }
     fetchModels();
@@ -104,11 +107,6 @@ export function ModelSelector() {
       ? sortModelsForDisplay(mergedModels)
       : mergedModels;
 
-  const modelItems = models.map((model) => ({
-    value: model.id,
-    label: model.name,
-  }));
-
   return (
     <div className="flex gap-2 px-3 py-2 border-b border-sidebar-border">
       <select
@@ -124,21 +122,26 @@ export function ModelSelector() {
       </select>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Select items={modelItems} value={selectedModel} onValueChange={(value) => value && setModel(value)}>
-          <SelectTrigger className="h-8 w-full min-w-0 bg-sidebar-accent px-2 text-xs text-sidebar-foreground hover:bg-sidebar-accent">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-80">
-            {models.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                {model.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <select
+          value={selectedModel}
+          onChange={(e) => setModel(e.target.value)}
+          className="h-8 w-full min-w-0 rounded-md border border-sidebar-border bg-sidebar-accent px-2 text-xs text-sidebar-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name}
+            </option>
+          ))}
+        </select>
         {selectedProvider === "openrouter" && (
           <p className="px-1 text-[10px] text-muted-foreground">
-            {providerModels.length > 0 ? `${providerModels.length} models loaded` : "Loading models..."}
+            {providerModels.length > 0
+              ? `${providerModels.length} models loaded`
+              : isLoadingModels
+                ? "Loading full model list..."
+                : hasModelLoadError
+                  ? `Using ${models.length} fallback models`
+                  : `Using ${models.length} fallback models`}
           </p>
         )}
       </div>
