@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import { createId } from "@/lib/utils";
 import type { ChatCompletionChunk } from "@/types/ai";
 import { Send, Square } from "lucide-react";
 
@@ -46,7 +47,7 @@ export function ChatInput() {
     setInput("");
 
     const userMsg = {
-      id: crypto.randomUUID(),
+      id: createId(),
       role: "user" as const,
       content: text,
       timestamp: Date.now(),

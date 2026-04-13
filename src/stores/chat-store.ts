@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { createId } from "@/lib/utils";
 import { ChatMessage, ProviderId, ModelInfo } from "@/types/ai";
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderId, string> = {
@@ -65,7 +66,7 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         if (state.streamingContent) {
           const msg: ChatMessage = {
-            id: crypto.randomUUID(),
+            id: createId(),
             role: "assistant",
             content: state.streamingContent,
             timestamp: Date.now(),
