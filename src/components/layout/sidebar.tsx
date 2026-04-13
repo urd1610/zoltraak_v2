@@ -1,9 +1,11 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   LayoutDashboard,
   ListChecks,
@@ -25,6 +27,9 @@ import {
   FileText,
   PanelLeftClose,
   PanelLeft,
+  Settings,
+  LogIn,
+  User,
 } from "lucide-react";
 import { NavItem } from "@/types/navigation";
 
@@ -52,6 +57,21 @@ const navItems: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { isCollapsed, toggle } = useSidebarStore();
+  const { navSettings, openSettings, openLogin, isLoggedIn, user, username, fetchNavSettings } =
+    useSettingsStore();
+
+  // Fetch nav settings on mount
+  React.useEffect(() => {
+    fetchNavSettings();
+  }, [fetchNavSettings]);
+
+  const visibleNavItems = navItems.filter((item) => {
+    const setting = navSettings.find((s) => s.nav_href === item.href);
+    if (!setting) return true;
+    if (setting.is_hidden) return false;
+    if (setting.admin_only && user?.role !== "admin") return false;
+    return true;
+  });
 
   return (
     <aside
@@ -73,7 +93,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2 px-2">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
           return (
@@ -94,6 +114,39 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="border-t border-sidebar-border px-2 py-2 space-y-0.5">
+        <button
+          onClick={openSettings}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          title={isCollapsed ? "設定" : undefined}
+        >
+          <Settings size={18} className="shrink-0" />
+          {!isCollapsed && <span>設定</span>}
+        </button>
+
+        <button
+          onClick={openLogin}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          title={isCollapsed ? (isLoggedIn ? user?.name ?? "アカウント" : "ログイン") : undefined}
+        >
+          {isLoggedIn && user ? (
+            <>
+              <div className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground shrink-0">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">{user.name}</span>
+              )}
+            </>
+          ) : (
+            <>
+              <LogIn size={18} className="shrink-0" />
+              {!isCollapsed && <span>ログイン</span>}
+            </>
+          )}
+        </button>
+      </div>
     </aside>
   );
 }

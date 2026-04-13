@@ -213,6 +213,7 @@ export default function SchedulePage() {
     category: "会議",
     location: "",
     priority: "medium",
+    description: "",
     recurrence_type: "none" as string,
     recurrence_end_date: "",
   });
@@ -293,6 +294,7 @@ export default function SchedulePage() {
       category: "会議",
       location: "",
       priority: "medium",
+      description: "",
       recurrence_type: "none",
       recurrence_end_date: "",
     });
@@ -312,6 +314,7 @@ export default function SchedulePage() {
       category: "会議",
       location: "",
       priority: "medium",
+      description: "",
       recurrence_type: "none",
       recurrence_end_date: "",
     });
@@ -332,6 +335,7 @@ export default function SchedulePage() {
       category: event.category,
       location: event.location,
       priority: event.priority || "medium",
+      description: event.description || "",
       recurrence_type: event.recurrence_type,
       recurrence_end_date: event.recurrence_end_date || "",
     });
@@ -360,6 +364,7 @@ export default function SchedulePage() {
         category: formData.category,
         color,
         location: formData.location,
+        description: formData.description || null,
         priority: formData.priority,
         recurrence_type: formData.recurrence_type,
       };
@@ -402,6 +407,7 @@ export default function SchedulePage() {
         category: formData.category,
         color,
         location: formData.location,
+        description: formData.description || null,
         priority: formData.priority,
         recurrence_type: formData.recurrence_type,
       };
@@ -1233,6 +1239,21 @@ export default function SchedulePage() {
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    詳細
+                  </label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) =>
+                      setFormData({ ...formData, description: e.target.value })
+                    }
+                    placeholder="詳細やメモ（任意）"
+                    rows={3}
+                    className="w-full rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
                     繰り返し
                   </label>
                   <select
@@ -1461,6 +1482,21 @@ export default function SchedulePage() {
                     }
                     placeholder="会議室または場所（任意）"
                     className="w-full rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    詳細
+                  </label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) =>
+                      setFormData({ ...formData, description: e.target.value })
+                    }
+                    placeholder="詳細やメモ（任意）"
+                    rows={3}
+                    className="w-full rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
                 </div>
 

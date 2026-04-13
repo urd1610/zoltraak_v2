@@ -1,0 +1,303 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: Admin
+        - button [ref=e6]:
+          - img [ref=e7]
+      - navigation [ref=e10]:
+        - link [ref=e314] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e12]
+          - generic [ref=e17]: ダッシュボード
+        - link [ref=e315] [cursor=pointer]:
+          - /url: /procedures
+          - img [ref=e19]
+          - generic [ref=e22]: 手順リスト
+        - link [ref=e316] [cursor=pointer]:
+          - /url: /schedule
+          - img [ref=e24]
+          - generic [ref=e26]: スケジュール
+        - link [ref=e317] [cursor=pointer]:
+          - /url: /gantt
+          - img [ref=e28]
+          - generic [ref=e29]: ガントチャート
+        - link [ref=e318] [cursor=pointer]:
+          - /url: /roadmap
+          - img [ref=e31]
+          - generic [ref=e33]: ロードマップ
+        - link [ref=e319] [cursor=pointer]:
+          - /url: /sessions
+          - img [ref=e35]
+          - generic [ref=e40]: セッション管理
+        - link [ref=e320] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e42]
+          - generic [ref=e54]: ユーザー管理
+        - link [ref=e321] [cursor=pointer]:
+          - /url: /stripe
+          - img [ref=e56]
+          - generic [ref=e58]: Stripe連携
+        - link [ref=e322] [cursor=pointer]:
+          - /url: /database
+          - img [ref=e60]
+          - generic [ref=e64]: DB操作
+        - link [ref=e323] [cursor=pointer]:
+          - /url: /email
+          - img [ref=e66]
+          - generic [ref=e69]: メール送信
+        - link [ref=e324] [cursor=pointer]:
+          - /url: /gmail
+          - img [ref=e71]
+          - generic [ref=e74]: Gmail受信箱
+        - link [ref=e325] [cursor=pointer]:
+          - /url: /calendar
+          - img [ref=e76]
+          - generic [ref=e78]: 配信カレンダー
+        - link [ref=e326] [cursor=pointer]:
+          - /url: /sns-analytics
+          - img [ref=e80]
+          - generic [ref=e82]: SNS分析
+        - link [ref=e327] [cursor=pointer]:
+          - /url: /scoring
+          - img [ref=e84]
+          - generic [ref=e87]: 採点
+        - link [ref=e328] [cursor=pointer]:
+          - /url: /lite
+          - img [ref=e89]
+          - generic [ref=e91]: ライト
+        - link [ref=e329] [cursor=pointer]:
+          - /url: /jobs
+          - img [ref=e93]
+          - generic [ref=e96]: ジョブズ
+        - link [ref=e330] [cursor=pointer]:
+          - /url: /ogp
+          - img [ref=e98]
+          - generic [ref=e102]: OGP画像
+        - link [ref=e331] [cursor=pointer]:
+          - /url: /requirements
+          - img [ref=e104]
+          - generic [ref=e107]: 要件定義
+      - generic [ref=e108]:
+        - button [ref=e332]:
+          - img [ref=e110]
+          - generic [ref=e113]: 設定
+        - button [ref=e333]:
+          - img [ref=e115]
+          - generic [ref=e118]: ログイン
+    - generic [ref=e119]:
+      - banner [ref=e120]:
+        - button [ref=e334]:
+          - img [ref=e123]
+          - generic [ref=e125]: AI
+      - main [ref=e126]:
+        - generic [ref=e127]:
+          - generic [ref=e128]:
+            - img [ref=e129]
+            - generic [ref=e134]:
+              - heading [level=1] [ref=e335]: ダッシュボード
+              - paragraph [ref=e136]: システム全体の概況を確認できます
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - generic [ref=e139]:
+                - generic [ref=e140]: ユーザー数
+                - img [ref=e141]
+              - generic [ref=e146]:
+                - generic [ref=e147]: 12,847
+                - generic [ref=e148]:
+                  - img [ref=e149]
+                  - generic [ref=e152]: +12.5%
+                  - generic [ref=e153]: 前月比
+            - generic [ref=e154]:
+              - generic [ref=e155]:
+                - generic [ref=e156]: セッション数
+                - img [ref=e157]
+              - generic [ref=e159]:
+                - generic [ref=e160]: 48,392
+                - generic [ref=e161]:
+                  - img [ref=e162]
+                  - generic [ref=e165]: +8.2%
+                  - generic [ref=e166]: 前月比
+            - generic [ref=e167]:
+              - generic [ref=e168]:
+                - generic [ref=e169]: 月間売上
+                - img [ref=e170]
+              - generic [ref=e172]:
+                - generic [ref=e173]: ¥3,842,000
+                - generic [ref=e174]:
+                  - img [ref=e175]
+                  - generic [ref=e178]: +23.1%
+                  - generic [ref=e179]: 前月比
+            - generic [ref=e180]:
+              - generic [ref=e181]:
+                - generic [ref=e182]: エラー率
+                - img [ref=e183]
+              - generic [ref=e185]:
+                - generic [ref=e186]: 0.12%
+                - generic [ref=e187]:
+                  - img [ref=e188]
+                  - generic [ref=e191]: "-0.03%"
+                  - generic [ref=e192]: 前月比
+          - generic [ref=e193]:
+            - generic [ref=e194]:
+              - generic [ref=e195]:
+                - generic [ref=e196]: 最近のアクティビティ
+                - generic [ref=e197]: 直近のシステム操作履歴
+              - generic [ref=e199]:
+                - generic [ref=e200]:
+                  - generic [ref=e201]:
+                    - img [ref=e203]
+                    - generic [ref=e205]:
+                      - paragraph [ref=e206]: 新規ユーザー登録
+                      - paragraph [ref=e207]: 田中太郎
+                  - generic [ref=e208]: 5分前
+                - generic [ref=e209]:
+                  - generic [ref=e210]:
+                    - img [ref=e212]
+                    - generic [ref=e214]:
+                      - paragraph [ref=e215]: 手順書を更新
+                      - paragraph [ref=e216]: 鈴木花子
+                  - generic [ref=e217]: 12分前
+                - generic [ref=e218]:
+                  - generic [ref=e219]:
+                    - img [ref=e221]
+                    - generic [ref=e223]:
+                      - paragraph [ref=e224]: プロジェクト作成
+                      - paragraph [ref=e225]: 佐藤次郎
+                  - generic [ref=e226]: 30分前
+                - generic [ref=e227]:
+                  - generic [ref=e228]:
+                    - img [ref=e230]
+                    - generic [ref=e232]:
+                      - paragraph [ref=e233]: スケジュール変更
+                      - paragraph [ref=e234]: 山田美咲
+                  - generic [ref=e235]: 1時間前
+                - generic [ref=e236]:
+                  - generic [ref=e237]:
+                    - img [ref=e239]
+                    - generic [ref=e241]:
+                      - paragraph [ref=e242]: レポート出力
+                      - paragraph [ref=e243]: 高橋健太
+                  - generic [ref=e244]: 2時間前
+                - generic [ref=e245]:
+                  - generic [ref=e246]:
+                    - img [ref=e248]
+                    - generic [ref=e250]:
+                      - paragraph [ref=e251]: セッション完了
+                      - paragraph [ref=e252]: 伊藤あかり
+                  - generic [ref=e253]: 3時間前
+            - generic [ref=e254]:
+              - generic [ref=e255]:
+                - generic [ref=e256]: クイックアクション
+                - generic [ref=e257]: よく使う操作
+              - generic [ref=e259]:
+                - button [ref=e336]:
+                  - img [ref=e261]
+                  - generic [ref=e262]: 新規プロジェクト
+                - button [ref=e337]:
+                  - img [ref=e264]
+                  - generic [ref=e267]: レポート作成
+                - button [ref=e338]:
+                  - img [ref=e269]
+                  - generic [ref=e272]: 設定
+                - button [ref=e339]:
+                  - img [ref=e274]
+                  - generic [ref=e279]: データ更新
+    - complementary [ref=e280]:
+      - generic [ref=e281]:
+        - generic [ref=e282]: AIアシスタント
+        - button [ref=e284]:
+          - img [ref=e285]
+      - generic [ref=e288]:
+        - combobox [ref=e289]
+        - generic [ref=e290]:
+          - combobox [ref=e291]
+          - paragraph [ref=e292]: 349 models loaded
+      - generic [ref=e294]:
+        - paragraph [ref=e295]: 何か相談したいことある？
+        - paragraph [ref=e296]: SNSのことでも、プロジェクトの進捗のことでも。
+      - generic [ref=e298]:
+        - textbox [ref=e340]:
+          - /placeholder: メッセージを入力...
+        - button [disabled] [ref=e300]:
+          - img [ref=e301]
+  - button "Open Next.js Dev Tools" [ref=e309] [cursor=pointer]:
+    - img [ref=e310]
+  - alert [ref=e313]
+  - dialog "設定" [ref=e344]:
+    - generic [ref=e345]:
+      - heading "設定" [level=2] [ref=e346]
+      - paragraph [ref=e347]: アプリケーションの設定を管理します
+    - generic [ref=e348]:
+      - generic [ref=e349]:
+        - heading "一般設定" [level=3] [ref=e350]
+        - generic [ref=e351]:
+          - generic [ref=e352]:
+            - generic [ref=e353]: 言語
+            - generic [ref=e354]: 日本語
+          - generic [ref=e356]:
+            - generic [ref=e357]: テーマ
+            - generic [ref=e358]: ダーク
+          - generic [ref=e360]:
+            - generic [ref=e361]: 通知
+            - switch [checked] [active] [ref=e362] [cursor=pointer]
+      - generic [ref=e365]:
+        - heading "サイドバー表示設定" [level=3] [ref=e366]
+        - generic [ref=e367]:
+          - generic [ref=e368]:
+            - generic [ref=e369]: ダッシュボード
+            - switch [checked] [ref=e370] [cursor=pointer]
+          - generic [ref=e373]:
+            - generic [ref=e374]: 手順リスト
+            - switch [checked] [ref=e375] [cursor=pointer]
+          - generic [ref=e378]:
+            - generic [ref=e379]: スケジュール
+            - switch [checked] [ref=e380] [cursor=pointer]
+          - generic [ref=e383]:
+            - generic [ref=e384]: ガントチャート
+            - switch [checked] [ref=e385] [cursor=pointer]
+          - generic [ref=e388]:
+            - generic [ref=e389]: ロードマップ
+            - switch [checked] [ref=e390] [cursor=pointer]
+          - generic [ref=e393]:
+            - generic [ref=e394]: セッション管理
+            - switch [checked] [ref=e395] [cursor=pointer]
+          - generic [ref=e398]:
+            - generic [ref=e399]: ユーザー管理
+            - switch [checked] [ref=e400] [cursor=pointer]
+          - generic [ref=e403]:
+            - generic [ref=e404]: Stripe連携
+            - switch [checked] [ref=e405] [cursor=pointer]
+          - generic [ref=e408]:
+            - generic [ref=e409]: DB操作
+            - switch [checked] [ref=e410] [cursor=pointer]
+          - generic [ref=e413]:
+            - generic [ref=e414]: メール送信
+            - switch [checked] [ref=e415] [cursor=pointer]
+          - generic [ref=e418]:
+            - generic [ref=e419]: Gmail受信箱
+            - switch [checked] [ref=e420] [cursor=pointer]
+          - generic [ref=e423]:
+            - generic [ref=e424]: 配信カレンダー
+            - switch [checked] [ref=e425] [cursor=pointer]
+          - generic [ref=e428]:
+            - generic [ref=e429]: SNS分析
+            - switch [checked] [ref=e430] [cursor=pointer]
+          - generic [ref=e433]:
+            - generic [ref=e434]: 採点
+            - switch [checked] [ref=e435] [cursor=pointer]
+          - generic [ref=e438]:
+            - generic [ref=e439]: ライト
+            - switch [checked] [ref=e440] [cursor=pointer]
+          - generic [ref=e443]:
+            - generic [ref=e444]: ジョブズ
+            - switch [checked] [ref=e445] [cursor=pointer]
+          - generic [ref=e448]:
+            - generic [ref=e449]: OGP画像
+            - switch [checked] [ref=e450] [cursor=pointer]
+          - generic [ref=e453]:
+            - generic [ref=e454]: 要件定義
+            - switch [checked] [ref=e455] [cursor=pointer]
+    - button "Close" [ref=e458]:
+      - img
+      - generic [ref=e459]: Close

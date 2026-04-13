@@ -3,6 +3,8 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { ChatPanel } from "@/components/ai-chat/chat-panel";
+import { SettingsDialog } from "@/components/layout/settings-dialog";
+import { LoginDialog } from "@/components/layout/login-dialog";
 
 export default function AdminLayout({
   children,
@@ -17,6 +19,8 @@ export default function AdminLayout({
         <main className="flex-1 overflow-auto p-6">{children}</main>
       </div>
       <ChatPanel />
+      <SettingsDialog />
+      <LoginDialog />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useChatStore } from "@/stores/chat-store";
-import { MessageSquare, Settings } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Header() {
@@ -25,9 +25,6 @@ export function Header() {
         >
           <MessageSquare size={16} />
           <span className="hidden sm:inline">AI</span>
-        </button>
-        <button className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-          <Settings size={18} />
         </button>
       </div>
     </header>
