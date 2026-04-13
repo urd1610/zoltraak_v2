@@ -2,11 +2,17 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { ChatMessage, ProviderId, ModelInfo } from "@/types/ai";
 
+const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderId, string> = {
+  openrouter: "anthropic/claude-sonnet-4",
+  lmstudio: "local-model",
+};
+
 interface ChatState {
   messages: ChatMessage[];
   selectedProvider: ProviderId;
   selectedModel: string;
-  availableModels: ModelInfo[];
+  selectedModelsByProvider: Record<ProviderId, string>;
+  availableModelsByProvider: Record<ProviderId, ModelInfo[]>;
   isStreaming: boolean;
   streamingContent: string;
   error: string | null;
@@ -19,7 +25,7 @@ interface ChatState {
   resetStream: () => void;
   setProvider: (provider: ProviderId) => void;
   setModel: (model: string) => void;
-  setAvailableModels: (models: ModelInfo[]) => void;
+  setAvailableModels: (provider: ProviderId, models: ModelInfo[]) => void;
   setError: (error: string | null) => void;
   clearMessages: () => void;
   togglePanel: () => void;
@@ -31,8 +37,12 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       messages: [],
       selectedProvider: "openrouter",
-      selectedModel: "anthropic/claude-sonnet-4",
-      availableModels: [],
+      selectedModel: DEFAULT_MODEL_BY_PROVIDER.openrouter,
+      selectedModelsByProvider: { ...DEFAULT_MODEL_BY_PROVIDER },
+      availableModelsByProvider: {
+        openrouter: [],
+        lmstudio: [],
+      },
       isStreaming: false,
       streamingContent: "",
       error: null,
@@ -73,9 +83,27 @@ export const useChatStore = create<ChatState>()(
       },
 
       resetStream: () => set({ isStreaming: false, streamingContent: "" }),
-      setProvider: (provider) => set({ selectedProvider: provider }),
-      setModel: (model) => set({ selectedModel: model }),
-      setAvailableModels: (models) => set({ availableModels: models }),
+      setProvider: (provider) =>
+        set((state) => ({
+          selectedProvider: provider,
+          selectedModel:
+            state.selectedModelsByProvider[provider] ?? DEFAULT_MODEL_BY_PROVIDER[provider],
+        })),
+      setModel: (model) =>
+        set((state) => ({
+          selectedModel: model,
+          selectedModelsByProvider: {
+            ...state.selectedModelsByProvider,
+            [state.selectedProvider]: model,
+          },
+        })),
+      setAvailableModels: (provider, models) =>
+        set((state) => ({
+          availableModelsByProvider: {
+            ...state.availableModelsByProvider,
+            [provider]: models,
+          },
+        })),
       setError: (error) => set({ error }),
       clearMessages: () =>
         set({
@@ -93,6 +121,7 @@ export const useChatStore = create<ChatState>()(
         messages: state.messages,
         selectedProvider: state.selectedProvider,
         selectedModel: state.selectedModel,
+        selectedModelsByProvider: state.selectedModelsByProvider,
         isPanelOpen: state.isPanelOpen,
       }),
     }
