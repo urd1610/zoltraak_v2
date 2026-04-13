@@ -9,7 +9,6 @@ import {
   X,
   Trash2,
   Pencil,
-  Repeat,
   MapPin,
   Clock,
 } from "lucide-react";
@@ -41,6 +40,7 @@ interface ApiEvent {
 }
 
 type CalendarEvent = ApiEvent;
+type CalendarView = "month" | "week";
 
 /** Build "YYYY-MM-DD" from year, month, day */
 function toDateStr(year: number, month: number, day: number): string {
@@ -144,11 +144,56 @@ function generateCalendarDays(year: number, month: number): (number | null)[] {
   return days;
 }
 
+const TODAY_YEAR = 2026;
+const TODAY_MONTH = 4;
+const TODAY_DAY = 13;
+const TODAY_DATE = new Date(TODAY_YEAR, TODAY_MONTH - 1, TODAY_DAY);
+
+function getStartOfWeek(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getWeekStartForMonth(year: number, month: number): Date {
+  const referenceDate =
+    year === TODAY_YEAR && month === TODAY_MONTH
+      ? TODAY_DATE
+      : new Date(year, month - 1, 1);
+  return getStartOfWeek(referenceDate);
+}
+
+function getWeekRange(startDate: Date) {
+  const normalizedStart = new Date(startDate);
+  normalizedStart.setHours(0, 0, 0, 0);
+  const endDate = addDays(normalizedStart, 6);
+  return {
+    startDate: normalizedStart,
+    endDate,
+    startDay: normalizedStart.getDate(),
+    endDay: endDate.getDate(),
+    startMonth: normalizedStart.getMonth() + 1,
+    endMonth: endDate.getMonth() + 1,
+  };
+}
+
 export default function SchedulePage() {
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(4);
+  const [currentYear, setCurrentYear] = useState(TODAY_YEAR);
+  const [currentMonth, setCurrentMonth] = useState(TODAY_MONTH);
+  const [viewMode, setViewMode] = useState<CalendarView>("month");
+  const [currentWeekStart, setCurrentWeekStart] = useState(() =>
+    getWeekStartForMonth(TODAY_YEAR, TODAY_MONTH)
+  );
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("すべて");
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -173,32 +218,57 @@ export default function SchedulePage() {
   });
 
   const calendarDays = generateCalendarDays(currentYear, currentMonth);
-  const today = 13;
+  const monthRangeStart = new Date(currentYear, currentMonth - 1, 1);
+  const monthRangeEnd = new Date(currentYear, currentMonth, 0);
+  const weekRange = getWeekRange(currentWeekStart);
+  const visibleRangeStart =
+    monthRangeStart.getTime() <= weekRange.startDate.getTime()
+      ? monthRangeStart
+      : weekRange.startDate;
+  const visibleRangeEnd =
+    monthRangeEnd.getTime() >= weekRange.endDate.getTime()
+      ? monthRangeEnd
+      : weekRange.endDate;
+  const visibleRangeStartStr = toDateStr(
+    visibleRangeStart.getFullYear(),
+    visibleRangeStart.getMonth() + 1,
+    visibleRangeStart.getDate()
+  );
+  const visibleRangeEndStr = toDateStr(
+    visibleRangeEnd.getFullYear(),
+    visibleRangeEnd.getMonth() + 1,
+    visibleRangeEnd.getDate()
+  );
+  const scheduleQuery = new URLSearchParams({
+    start: visibleRangeStartStr,
+    end: visibleRangeEndStr,
+  }).toString();
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`/api/schedule?year=${currentYear}&month=${currentMonth}`);
+        const response = await fetch(`/api/schedule?${scheduleQuery}`);
         const data = await response.json();
         setEvents(data.events as CalendarEvent[]);
       } catch (error) {
         console.error("Failed to fetch events:", error);
       } finally {
         setLoading(false);
+        setHasFetchedOnce(true);
       }
     };
 
     fetchEvents();
-  }, [currentYear, currentMonth]);
+  }, [scheduleQuery]);
 
   const filteredEvents =
     selectedCategory === "すべて"
       ? events
       : events.filter((e) => e.category === selectedCategory);
 
-  const isCurrentMonth = currentYear === 2026 && currentMonth === 4;
-  const todayDay = isCurrentMonth ? today : null;
+  const isCurrentMonth = currentYear === TODAY_YEAR && currentMonth === TODAY_MONTH;
+  const todayDay = isCurrentMonth ? TODAY_DAY : null;
 
   const handleEventClick = (event: CalendarEvent) => {
     setSelectedEvent(event);
@@ -305,7 +375,7 @@ export default function SchedulePage() {
       });
 
       if (response.ok) {
-        const response2 = await fetch(`/api/schedule?year=${currentYear}&month=${currentMonth}`);
+        const response2 = await fetch(`/api/schedule?${scheduleQuery}`);
         const data = await response2.json();
         setEvents(data.events as CalendarEvent[]);
         setShowAddModal(false);
@@ -347,7 +417,7 @@ export default function SchedulePage() {
       });
 
       if (response.ok) {
-        const response2 = await fetch(`/api/schedule?year=${currentYear}&month=${currentMonth}`);
+        const response2 = await fetch(`/api/schedule?${scheduleQuery}`);
         const data = await response2.json();
         setEvents(data.events as CalendarEvent[]);
         setShowEditModal(false);
@@ -365,7 +435,7 @@ export default function SchedulePage() {
       });
 
       if (response.ok) {
-        const response2 = await fetch(`/api/schedule?year=${currentYear}&month=${currentMonth}`);
+        const response2 = await fetch(`/api/schedule?${scheduleQuery}`);
         const data = await response2.json();
         setEvents(data.events as CalendarEvent[]);
         setSelectedEvent(null);
@@ -381,8 +451,11 @@ export default function SchedulePage() {
     if (currentMonth === 1) {
       setCurrentMonth(12);
       setCurrentYear(currentYear - 1);
+      setCurrentWeekStart(getWeekStartForMonth(currentYear - 1, 12));
     } else {
-      setCurrentMonth(currentMonth - 1);
+      const nextMonth = currentMonth - 1;
+      setCurrentMonth(nextMonth);
+      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth));
     }
   };
 
@@ -390,42 +463,41 @@ export default function SchedulePage() {
     if (currentMonth === 12) {
       setCurrentMonth(1);
       setCurrentYear(currentYear + 1);
+      setCurrentWeekStart(getWeekStartForMonth(currentYear + 1, 1));
     } else {
-      setCurrentMonth(currentMonth + 1);
+      const nextMonth = currentMonth + 1;
+      setCurrentMonth(nextMonth);
+      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth));
     }
   };
 
   const handleTodayClick = () => {
-    setCurrentYear(2026);
-    setCurrentMonth(4);
+    setCurrentYear(TODAY_YEAR);
+    setCurrentMonth(TODAY_MONTH);
+    setCurrentWeekStart(getWeekStartForMonth(TODAY_YEAR, TODAY_MONTH));
   };
 
-  const getWeekRange = () => {
-    let startDate: Date;
-    if (isCurrentMonth) {
-      startDate = new Date(currentYear, currentMonth - 1, today);
-      const dayOfWeek = startDate.getDay();
-      startDate = new Date(currentYear, currentMonth - 1, today - dayOfWeek);
-    } else {
-      startDate = new Date(currentYear, currentMonth - 1, 1);
-      const dayOfWeek = startDate.getDay();
-      startDate = new Date(currentYear, currentMonth - 1, 1 - dayOfWeek);
-    }
-
-    const endDate = new Date(startDate.getTime() + 6 * 24 * 60 * 60 * 1000);
-    return {
-      startDate,
-      endDate,
-      startDay: startDate.getDate(),
-      endDay: endDate.getDate(),
-      startMonth: startDate.getMonth() + 1,
-      endMonth: endDate.getMonth() + 1,
-    };
+  const handlePreviousWeek = () => {
+    const nextWeekStart = addDays(currentWeekStart, -7);
+    setCurrentWeekStart(nextWeekStart);
+    setCurrentYear(nextWeekStart.getFullYear());
+    setCurrentMonth(nextWeekStart.getMonth() + 1);
   };
 
-  const weekRange = getWeekRange();
+  const handleNextWeek = () => {
+    const nextWeekStart = addDays(currentWeekStart, 7);
+    setCurrentWeekStart(nextWeekStart);
+    setCurrentYear(nextWeekStart.getFullYear());
+    setCurrentMonth(nextWeekStart.getMonth() + 1);
+  };
 
-  if (loading) {
+  const handleCurrentWeekClick = () => {
+    setCurrentWeekStart(getStartOfWeek(TODAY_DATE));
+    setCurrentYear(TODAY_YEAR);
+    setCurrentMonth(TODAY_MONTH);
+  };
+
+  if (!hasFetchedOnce && loading) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -434,7 +506,7 @@ export default function SchedulePage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">スケジュール</h1>
               <p className="text-sm text-muted-foreground">
-                月間スケジュールを管理します
+                月間・週間スケジュールを管理します
               </p>
             </div>
           </div>
@@ -457,7 +529,7 @@ export default function SchedulePage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">スケジュール</h1>
             <p className="text-sm text-muted-foreground">
-              月間スケジュールを管理します
+              月間・週間スケジュールを管理します
             </p>
           </div>
         </div>
@@ -488,11 +560,14 @@ export default function SchedulePage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="month">
+      <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as CalendarView)}>
         <TabsList>
           <TabsTrigger value="month">月間</TabsTrigger>
           <TabsTrigger value="week">週間</TabsTrigger>
         </TabsList>
+        {loading && hasFetchedOnce && (
+          <p className="text-xs text-muted-foreground">表示を更新中...</p>
+        )}
 
         {/* Month Tab */}
         <TabsContent value="month">
@@ -605,19 +680,19 @@ export default function SchedulePage() {
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={handlePreviousMonth}
+                    onClick={handlePreviousWeek}
                     className="rounded-md p-1.5 transition-colors hover:bg-muted"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={handleTodayClick}
+                    onClick={handleCurrentWeekClick}
                     className="rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
                   >
                     今週
                   </button>
                   <button
-                    onClick={handleNextMonth}
+                    onClick={handleNextWeek}
                     className="rounded-md p-1.5 transition-colors hover:bg-muted"
                   >
                     <ChevronRight className="h-4 w-4" />

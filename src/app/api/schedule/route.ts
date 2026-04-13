@@ -1,5 +1,33 @@
 import { NextRequest } from "next/server";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import pool from "@/lib/db";
+
+interface ScheduleEventRow extends RowDataPacket {
+  id: number;
+  title: string;
+  start_date: Date | string;
+  end_date: Date | string;
+  is_all_day: number | boolean;
+  start_time: Date | string | null;
+  end_time: Date | string | null;
+  category: string;
+  color: string;
+  location: string;
+  description: string | null;
+  priority: string;
+  recurrence_type: string | null;
+  recurrence_end_date: Date | string | null;
+  recurrence_parent_id: number | null;
+}
+
+interface ScheduleSeriesRow extends RowDataPacket {
+  id: number;
+  recurrence_parent_id: number | null;
+}
+
+interface ScheduleSeriesFutureRow extends ScheduleSeriesRow {
+  start_date: Date | string;
+}
 
 function formatDate(date: Date | string): string {
   if (typeof date === "string") {
@@ -21,7 +49,7 @@ function formatTime(time: Date | string | null): string | null {
   return `${hours}:${minutes}`;
 }
 
-function formatRow(row: any) {
+function formatRow(row: ScheduleEventRow) {
   return {
     ...row,
     start_date: formatDate(row.start_date),
@@ -94,13 +122,18 @@ function generateRecurrenceDates(
 
 export async function GET(req: NextRequest) {
   try {
+    const start = req.nextUrl.searchParams.get("start");
+    const end = req.nextUrl.searchParams.get("end");
     const year = req.nextUrl.searchParams.get("year");
     const month = req.nextUrl.searchParams.get("month");
 
     let query = "SELECT * FROM schedule_events";
     const params: (string | number)[] = [];
 
-    if (year && month) {
+    if (start && end) {
+      query += " WHERE start_date <= ? AND end_date >= ?";
+      params.push(end, start);
+    } else if (year && month) {
       const monthStr = String(month).padStart(2, "0");
       const firstDayOfMonth = `${year}-${monthStr}-01`;
       const lastDayOfMonth = new Date(
@@ -118,8 +151,8 @@ export async function GET(req: NextRequest) {
 
     const connection = await pool.getConnection();
     try {
-      const [rows] = await connection.execute(query, params);
-      const formattedRows = (rows as any[]).map(formatRow);
+      const [rows] = await connection.execute<ScheduleEventRow[]>(query, params);
+      const formattedRows = rows.map(formatRow);
       return Response.json({ events: formattedRows });
     } finally {
       connection.release();
@@ -180,7 +213,7 @@ export async function POST(req: NextRequest) {
       const insertQuery =
         "INSERT INTO schedule_events (title, start_date, end_date, is_all_day, start_time, end_time, category, color, location, description, priority, recurrence_type, recurrence_end_date, recurrence_parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-      const [parentResult]: any = await connection.execute(insertQuery, [
+      const [parentResult] = await connection.execute<ResultSetHeader>(insertQuery, [
         title,
         start_date,
         end_date,
@@ -230,7 +263,7 @@ export async function POST(req: NextRequest) {
         childCount = occurrences.length;
       }
 
-      const [result]: any = await connection.execute(
+      const [result] = await connection.execute<ScheduleEventRow[]>(
         "SELECT * FROM schedule_events WHERE id = ?",
         [parentId]
       );
@@ -329,7 +362,7 @@ export async function DELETE(req: NextRequest) {
     try {
       if (scope === "all") {
         // Delete the entire series: find the parent, delete parent + all children
-        const [rows]: any = await connection.execute(
+        const [rows] = await connection.execute<ScheduleSeriesRow[]>(
           "SELECT id, recurrence_parent_id FROM schedule_events WHERE id = ?",
           [eventId]
         );
@@ -342,7 +375,7 @@ export async function DELETE(req: NextRequest) {
         }
       } else if (scope === "future") {
         // Delete this occurrence and all future ones in the same series
-        const [rows]: any = await connection.execute(
+        const [rows] = await connection.execute<ScheduleSeriesFutureRow[]>(
           "SELECT id, start_date, recurrence_parent_id FROM schedule_events WHERE id = ?",
           [eventId]
         );
