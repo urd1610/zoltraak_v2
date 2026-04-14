@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 interface ApiEvent {
   id: number;
@@ -86,6 +87,41 @@ function formatEventTimeSnippet(event: CalendarEvent): string | null {
   }
   if (event.start_time) return `${event.start_time}〜`;
   return null;
+}
+
+function parseDateParts(dateStr: string) {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return { year, month, day };
+}
+
+function createLocalDateTime(dateStr: string, timeStr: string) {
+  const { year, month, day } = parseDateParts(dateStr);
+  const [hour = 0, minute = 0] = timeStr.split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+function createLocalEndOfDay(dateStr: string) {
+  const { year, month, day } = parseDateParts(dateStr);
+  return new Date(year, month - 1, day, 23, 59, 59, 999);
+}
+
+function getEventTimeRange(event: CalendarEvent) {
+  if (event.is_all_day) {
+    return {
+      start: createLocalDateTime(event.start_date, "00:00"),
+      end: createLocalEndOfDay(event.end_date),
+    };
+  }
+
+  return {
+    start: createLocalDateTime(event.start_date, event.start_time ?? "00:00"),
+    end: createLocalDateTime(event.end_date, event.end_time ?? "23:59"),
+  };
+}
+
+function isEventActiveNow(event: CalendarEvent, now: Date): boolean {
+  const { start, end } = getEventTimeRange(event);
+  return start <= now && now <= end;
 }
 
 const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
@@ -199,8 +235,16 @@ function getWeekRange(startDate: Date) {
 
 export default function SchedulePage() {
   const [todayForHighlight, setTodayForHighlight] = useState<LocalDate | null>(null);
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    setTodayForHighlight(readLocalToday());
+    const syncNow = () => {
+      setTodayForHighlight(readLocalToday());
+      setNow(new Date());
+    };
+
+    syncNow();
+    const intervalId = window.setInterval(syncNow, 60_000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   const [currentYear, setCurrentYear] = useState(() => readLocalToday().year);
@@ -941,7 +985,7 @@ export default function SchedulePage() {
           <CardTitle>今後の予定</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
+          <div className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
             {filteredEvents
               .filter((e) => {
                 const todayStr = isCurrentMonth && todayDay
@@ -956,21 +1000,33 @@ export default function SchedulePage() {
                 const tb = b.start_time || "";
                 return ta.localeCompare(tb);
               })
-              .slice(0, 5)
               .map((event) => {
                 const dateDisplay = formatEventDateDisplay(event);
                 const timeSnippet = formatEventTimeSnippet(event);
                 const loc = event.location?.trim();
+                const isActiveNow = isEventActiveNow(event, now);
                 return (
                   <button
                     key={event.id}
                     onClick={() => handleEventClick(event)}
-                    className="w-full text-left flex items-start gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/50"
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-muted/50",
+                      isActiveNow
+                        ? "border-primary/35 bg-primary/5 shadow-sm"
+                        : "border-border/50"
+                    )}
                   >
                     <div className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${event.color}`} />
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-medium leading-snug truncate">{event.title}</p>
+                        <p
+                          className={cn(
+                            "truncate text-sm font-medium leading-snug",
+                            isActiveNow && "text-foreground"
+                          )}
+                        >
+                          {event.title}
+                        </p>
                         {event.priority !== "medium" && (
                           <span className={`shrink-0 text-xs font-semibold ${priorityMap[event.priority]?.color || ""}`}>
                             {priorityMap[event.priority]?.icon}{priorityMap[event.priority]?.label}
