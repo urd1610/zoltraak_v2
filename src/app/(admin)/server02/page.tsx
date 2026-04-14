@@ -34,6 +34,7 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/stores/settings-store";
 
 interface FileEntry {
   id: number;
@@ -176,6 +177,9 @@ function getFileIcon(extension: string | null, isDirectory: boolean) {
 }
 
 export default function Server02Page() {
+  const { isLoggedIn, isAdmin, getAuthHeaders } = useSettingsStore();
+  const canManageScan = isLoggedIn && isAdmin();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedShare, setSelectedShare] = useState("");
   const [selectedExtension, setSelectedExtension] = useState("");
@@ -359,11 +363,16 @@ export default function Server02Page() {
   }, [isScanning, fetchStats]);
 
   const handleScan = async (targetShare?: string) => {
+    if (!canManageScan) return;
     try {
+      const headers = getAuthHeaders();
       const body = targetShare ? { share: targetShare } : {};
       const response = await fetch("/api/server02/scan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
         body: JSON.stringify(body),
       });
 
@@ -391,8 +400,12 @@ export default function Server02Page() {
   };
 
   const handleStopScan = async () => {
+    if (!canManageScan) return;
     try {
-      await fetch("/api/server02/scan", { method: "DELETE" });
+      await fetch("/api/server02/scan", {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
       setScanProgress("スキャンを停止中...");
     } catch {
       // 次回ポーリングで状態が反映される
@@ -462,42 +475,46 @@ export default function Server02Page() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isScanning && (
-            <Button
-              variant="outline"
-              onClick={handleStopScan}
-              className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-            >
-              <Square className="h-4 w-4 mr-2" />
-              停止
-            </Button>
+          {canManageScan && (
+            <>
+              {isScanning && (
+                <Button
+                  variant="outline"
+                  onClick={handleStopScan}
+                  className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                >
+                  <Square className="h-4 w-4 mr-2" />
+                  停止
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs hover:bg-primary/90 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                  disabled={isScanning}
+                >
+                  <RefreshCw className={cn("h-4 w-4", isScanning && "animate-spin")} />
+                  {isScanning ? "スキャン中..." : "スキャン"}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>スキャン対象</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleScan()}>
+                      すべての共有フォルダ
+                    </DropdownMenuItem>
+                    {shares.map((share) => (
+                      <DropdownMenuItem
+                        key={share}
+                        onClick={() => handleScan(share)}
+                      >
+                        {share}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs hover:bg-primary/90 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-              disabled={isScanning}
-            >
-              <RefreshCw className={cn("h-4 w-4", isScanning && "animate-spin")} />
-              {isScanning ? "スキャン中..." : "スキャン"}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>スキャン対象</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => handleScan()}>
-                  すべての共有フォルダ
-                </DropdownMenuItem>
-                {shares.map((share) => (
-                  <DropdownMenuItem
-                    key={share}
-                    onClick={() => handleScan(share)}
-                  >
-                    {share}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 

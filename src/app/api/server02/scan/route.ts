@@ -4,6 +4,7 @@ import { RowDataPacket } from "mysql2";
 import { readdir, stat } from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
+import { getAuthUser } from "@/lib/auth";
 
 const SMB_HOST = "192.168.0.153";
 const SHARES = [
@@ -310,6 +311,14 @@ async function runScanInBackground(
 // POST — スキャン開始（バックグラウンド実行）
 // ──────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const user = await getAuthUser(req);
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+  if (user.role !== "admin") {
+    return NextResponse.json({ error: "管理者権限が必要です" }, { status: 403 });
+  }
+
   // 既にスキャン中なら拒否
   if (activeScan && activeScan.status === "running") {
     return NextResponse.json(
@@ -335,7 +344,15 @@ export async function POST(req: NextRequest) {
 // ──────────────────────────────────────────
 // DELETE — スキャン停止
 // ──────────────────────────────────────────
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const user = await getAuthUser(req);
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+  if (user.role !== "admin") {
+    return NextResponse.json({ error: "管理者権限が必要です" }, { status: 403 });
+  }
+
   if (!activeScan || activeScan.status !== "running") {
     return NextResponse.json({ error: "実行中のスキャンはありません" }, { status: 404 });
   }
