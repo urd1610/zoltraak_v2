@@ -7,6 +7,7 @@ export interface ChatMessage {
   timestamp: number;
   model?: string;
   provider?: ProviderId;
+  isActionResult?: boolean;
 }
 
 export interface ModelInfo {

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePageContextStore } from "@/stores/page-context-store";
+import type { PageAction } from "@/stores/page-context-store";
 import {
   CalendarDays,
   ChevronLeft,
@@ -144,10 +146,17 @@ function generateCalendarDays(year: number, month: number): (number | null)[] {
   return days;
 }
 
-const TODAY_YEAR = 2026;
-const TODAY_MONTH = 4;
-const TODAY_DAY = 13;
-const TODAY_DATE = new Date(TODAY_YEAR, TODAY_MONTH - 1, TODAY_DAY);
+/** Local calendar date in the user's timezone (not UTC). */
+type LocalDate = { year: number; month: number; day: number };
+
+function readLocalToday(): LocalDate {
+  const d = new Date();
+  return {
+    year: d.getFullYear(),
+    month: d.getMonth() + 1,
+    day: d.getDate(),
+  };
+}
 
 function getStartOfWeek(date: Date): Date {
   const start = new Date(date);
@@ -162,10 +171,14 @@ function addDays(date: Date, days: number): Date {
   return next;
 }
 
-function getWeekStartForMonth(year: number, month: number): Date {
+function getWeekStartForMonth(
+  year: number,
+  month: number,
+  today: LocalDate | null
+): Date {
   const referenceDate =
-    year === TODAY_YEAR && month === TODAY_MONTH
-      ? TODAY_DATE
+    today && year === today.year && month === today.month
+      ? new Date(today.year, today.month - 1, today.day)
       : new Date(year, month - 1, 1);
   return getStartOfWeek(referenceDate);
 }
@@ -185,12 +198,18 @@ function getWeekRange(startDate: Date) {
 }
 
 export default function SchedulePage() {
-  const [currentYear, setCurrentYear] = useState(TODAY_YEAR);
-  const [currentMonth, setCurrentMonth] = useState(TODAY_MONTH);
+  const [todayForHighlight, setTodayForHighlight] = useState<LocalDate | null>(null);
+  useEffect(() => {
+    setTodayForHighlight(readLocalToday());
+  }, []);
+
+  const [currentYear, setCurrentYear] = useState(() => readLocalToday().year);
+  const [currentMonth, setCurrentMonth] = useState(() => readLocalToday().month);
   const [viewMode, setViewMode] = useState<CalendarView>("month");
-  const [currentWeekStart, setCurrentWeekStart] = useState(() =>
-    getWeekStartForMonth(TODAY_YEAR, TODAY_MONTH)
-  );
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+    const t = readLocalToday();
+    return getWeekStartForMonth(t.year, t.month, t);
+  });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
@@ -263,13 +282,115 @@ export default function SchedulePage() {
     fetchEvents();
   }, [scheduleQuery]);
 
+  // ── AI Assistant: ページコンテキスト登録 ──
+  const { setPageContext, clearPageContext, refreshTrigger } = usePageContextStore();
+
+  useEffect(() => {
+    const scheduleActions: PageAction[] = [
+      {
+        name: "schedule_add",
+        description: "新しいスケジュールイベントを追加します",
+        parameters: {
+          title: { type: "string", description: "イベントのタイトル", required: true },
+          start_date: { type: "string", description: "開始日 (YYYY-MM-DD)", required: true },
+          end_date: { type: "string", description: "終了日 (YYYY-MM-DD)", required: true },
+          is_all_day: { type: "boolean", description: "終日イベントかどうか" },
+          start_time: { type: "string", description: "開始時刻 (HH:MM) ※終日でない場合に必要" },
+          end_time: { type: "string", description: "終了時刻 (HH:MM) ※終日でない場合に必要" },
+          category: { type: "string", description: "カテゴリ", required: true, enum: ["会議", "スプリント", "1on1", "マイルストーン", "全体", "休み", "その他"] },
+          color: { type: "string", description: "Tailwindカラークラス (例: bg-blue-500)", required: true, enum: ["bg-blue-500", "bg-emerald-500", "bg-violet-500", "bg-red-500", "bg-amber-500", "bg-rose-500", "bg-gray-500"] },
+          location: { type: "string", description: "場所" },
+          description: { type: "string", description: "説明" },
+          priority: { type: "string", description: "優先度", enum: ["low", "medium", "high", "urgent"] },
+          recurrence_type: { type: "string", description: "繰り返しタイプ", enum: ["none", "daily", "weekdays", "weekly", "monthly", "yearly"] },
+          recurrence_end_date: { type: "string", description: "繰り返し終了日 (YYYY-MM-DD) ※繰り返しの場合に必要" },
+        },
+      },
+      {
+        name: "schedule_update",
+        description: "既存のスケジュールイベントを更新します",
+        parameters: {
+          id: { type: "number", description: "更新するイベントのID", required: true },
+          title: { type: "string", description: "イベントのタイトル" },
+          start_date: { type: "string", description: "開始日 (YYYY-MM-DD)" },
+          end_date: { type: "string", description: "終了日 (YYYY-MM-DD)" },
+          is_all_day: { type: "boolean", description: "終日イベントかどうか" },
+          start_time: { type: "string", description: "開始時刻 (HH:MM)" },
+          end_time: { type: "string", description: "終了時刻 (HH:MM)" },
+          category: { type: "string", description: "カテゴリ", enum: ["会議", "スプリント", "1on1", "マイルストーン", "全体", "休み", "その他"] },
+          color: { type: "string", description: "Tailwindカラークラス" },
+          location: { type: "string", description: "場所" },
+          description: { type: "string", description: "説明" },
+          priority: { type: "string", description: "優先度", enum: ["low", "medium", "high", "urgent"] },
+        },
+      },
+      {
+        name: "schedule_delete",
+        description: "スケジュールイベントを削除します",
+        parameters: {
+          id: { type: "number", description: "削除するイベントのID", required: true },
+          scope: { type: "string", description: "削除範囲", enum: ["single", "all", "future"] },
+        },
+      },
+    ];
+
+    const eventsSummary = events.map((e) => ({
+      id: e.id,
+      title: e.title,
+      start_date: e.start_date,
+      end_date: e.end_date,
+      is_all_day: e.is_all_day,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      category: e.category,
+      location: e.location,
+      priority: e.priority,
+      description: e.description,
+    }));
+
+    setPageContext(
+      "schedule",
+      "スケジュール",
+      {
+        currentYear,
+        currentMonth,
+        viewMode,
+        selectedCategory,
+        totalEvents: events.length,
+        events: eventsSummary,
+      },
+      scheduleActions
+    );
+
+    return () => clearPageContext();
+  }, [events, currentYear, currentMonth, viewMode, selectedCategory, setPageContext, clearPageContext]);
+
+  // ── AI Assistant: リフレッシュトリガー ──
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      const refetch = async () => {
+        try {
+          const response = await fetch(`/api/schedule?${scheduleQuery}`);
+          const data = await response.json();
+          setEvents(data.events as CalendarEvent[]);
+        } catch (error) {
+          console.error("Failed to refresh events:", error);
+        }
+      };
+      refetch();
+    }
+  }, [refreshTrigger, scheduleQuery]);
+
   const filteredEvents =
     selectedCategory === "すべて"
       ? events
       : events.filter((e) => e.category === selectedCategory);
 
-  const isCurrentMonth = currentYear === TODAY_YEAR && currentMonth === TODAY_MONTH;
-  const todayDay = isCurrentMonth ? TODAY_DAY : null;
+  const isCurrentMonth =
+    todayForHighlight !== null &&
+    currentYear === todayForHighlight.year &&
+    currentMonth === todayForHighlight.month;
+  const todayDay = isCurrentMonth ? todayForHighlight.day : null;
 
   const handleEventClick = (event: CalendarEvent) => {
     setSelectedEvent(event);
@@ -457,11 +578,11 @@ export default function SchedulePage() {
     if (currentMonth === 1) {
       setCurrentMonth(12);
       setCurrentYear(currentYear - 1);
-      setCurrentWeekStart(getWeekStartForMonth(currentYear - 1, 12));
+      setCurrentWeekStart(getWeekStartForMonth(currentYear - 1, 12, todayForHighlight));
     } else {
       const nextMonth = currentMonth - 1;
       setCurrentMonth(nextMonth);
-      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth));
+      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth, todayForHighlight));
     }
   };
 
@@ -469,18 +590,20 @@ export default function SchedulePage() {
     if (currentMonth === 12) {
       setCurrentMonth(1);
       setCurrentYear(currentYear + 1);
-      setCurrentWeekStart(getWeekStartForMonth(currentYear + 1, 1));
+      setCurrentWeekStart(getWeekStartForMonth(currentYear + 1, 1, todayForHighlight));
     } else {
       const nextMonth = currentMonth + 1;
       setCurrentMonth(nextMonth);
-      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth));
+      setCurrentWeekStart(getWeekStartForMonth(currentYear, nextMonth, todayForHighlight));
     }
   };
 
   const handleTodayClick = () => {
-    setCurrentYear(TODAY_YEAR);
-    setCurrentMonth(TODAY_MONTH);
-    setCurrentWeekStart(getWeekStartForMonth(TODAY_YEAR, TODAY_MONTH));
+    const t = readLocalToday();
+    setTodayForHighlight(t);
+    setCurrentYear(t.year);
+    setCurrentMonth(t.month);
+    setCurrentWeekStart(getWeekStartForMonth(t.year, t.month, t));
   };
 
   const handlePreviousWeek = () => {
@@ -498,9 +621,11 @@ export default function SchedulePage() {
   };
 
   const handleCurrentWeekClick = () => {
-    setCurrentWeekStart(getStartOfWeek(TODAY_DATE));
-    setCurrentYear(TODAY_YEAR);
-    setCurrentMonth(TODAY_MONTH);
+    const t = readLocalToday();
+    setTodayForHighlight(t);
+    setCurrentWeekStart(getStartOfWeek(new Date(t.year, t.month - 1, t.day)));
+    setCurrentYear(t.year);
+    setCurrentMonth(t.month);
   };
 
   if (!hasFetchedOnce && loading) {

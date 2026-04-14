@@ -1,0 +1,224 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: zoltraak system
+        - button [ref=e6]:
+          - img [ref=e7]
+      - navigation [ref=e10]:
+        - link "ダッシュボード" [ref=e11] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e12]
+          - generic [ref=e17]: ダッシュボード
+        - link "スケジュール" [ref=e18] [cursor=pointer]:
+          - /url: /schedule
+          - img [ref=e19]
+          - generic [ref=e21]: スケジュール
+        - link "ガントチャート" [ref=e22] [cursor=pointer]:
+          - /url: /gantt
+          - img [ref=e23]
+          - generic [ref=e24]: ガントチャート
+      - generic [ref=e25]:
+        - button "設定" [ref=e26]:
+          - img [ref=e27]
+          - generic [ref=e30]: 設定
+        - button "ログイン" [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e35]: ログイン
+    - generic [ref=e36]:
+      - banner [ref=e37]:
+        - button "AI" [ref=e39]:
+          - img [ref=e40]
+          - generic [ref=e42]: AI
+      - main [ref=e43]:
+        - generic [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - img [ref=e47]
+              - generic [ref=e49]:
+                - heading "スケジュール" [level=1] [ref=e50]
+                - paragraph [ref=e51]: 月間・週間スケジュールを管理します
+            - button "予定を追加" [ref=e52]:
+              - img [ref=e53]
+              - text: 予定を追加
+          - generic [ref=e54]:
+            - button "すべて" [ref=e55]
+            - button "会議" [ref=e56]
+            - button "スプリント" [ref=e57]
+            - button "1on1" [ref=e58]
+            - button "マイルストーン" [ref=e59]
+            - button "全体" [ref=e60]
+            - button "休み" [ref=e61]
+            - button "その他" [ref=e62]
+          - generic [ref=e63]:
+            - tablist [ref=e64]:
+              - tab "月間" [selected] [ref=e65]
+              - tab "週間" [ref=e66]
+            - tabpanel "月間" [ref=e67]:
+              - generic [ref=e68]:
+                - generic [ref=e70]:
+                  - generic [ref=e71]: 2026年 4月
+                  - generic [ref=e72]:
+                    - button [ref=e73]:
+                      - img [ref=e74]
+                    - button "今日" [ref=e76]
+                    - button [ref=e77]:
+                      - img [ref=e78]
+                - generic [ref=e80]:
+                  - generic [ref=e81]:
+                    - generic [ref=e82]: 日
+                    - generic [ref=e83]: 月
+                    - generic [ref=e84]: 火
+                    - generic [ref=e85]: 水
+                    - generic [ref=e86]: 木
+                    - generic [ref=e87]: 金
+                    - generic [ref=e88]: 土
+                  - generic [ref=e89]:
+                    - generic [ref=e94] [cursor=pointer]: "1"
+                    - generic [ref=e96] [cursor=pointer]: "2"
+                    - generic [ref=e98] [cursor=pointer]: "3"
+                    - generic [ref=e100] [cursor=pointer]: "4"
+                    - generic [ref=e102] [cursor=pointer]: "5"
+                    - generic [ref=e104] [cursor=pointer]: "6"
+                    - generic [ref=e106] [cursor=pointer]: "7"
+                    - generic [ref=e108] [cursor=pointer]: "8"
+                    - generic [ref=e110] [cursor=pointer]: "9"
+                    - generic [ref=e112] [cursor=pointer]: "10"
+                    - generic [ref=e114] [cursor=pointer]: "11"
+                    - generic [ref=e116] [cursor=pointer]: "12"
+                    - generic [ref=e118] [cursor=pointer]: "13"
+                    - generic [ref=e119] [cursor=pointer]:
+                      - generic [ref=e120]: "14"
+                      - generic [ref=e121]:
+                        - button "IMSD_Server02-ChatBot" [ref=e122]:
+                          - generic [ref=e123]: IMSD_Server02-ChatBot
+                        - button "zoltraak_ガントチャート機能実装" [ref=e124]:
+                          - generic [ref=e125]: zoltraak_ガントチャート機能実装
+                        - button "工務・物流定期MT" [ref=e126]:
+                          - generic [ref=e127]: 工務・物流定期MT
+                        - button "部内年度計画フォロー" [ref=e128]:
+                          - generic [ref=e129]: 部内年度計画フォロー
+                    - generic [ref=e130] [cursor=pointer]:
+                      - generic [ref=e131]: "15"
+                      - button "ISO定期審査" [ref=e133]:
+                        - generic [ref=e134]: ISO定期審査
+                    - generic [ref=e135] [cursor=pointer]:
+                      - generic [ref=e136]: "16"
+                      - generic [ref=e137]:
+                        - button "ISO定期審査" [ref=e138]:
+                          - generic [ref=e139]: ISO定期審査
+                        - button "↑ ISO定期審査_工務G" [ref=e140]:
+                          - generic [ref=e141]: ↑
+                          - generic [ref=e142]: ISO定期審査_工務G
+                    - generic [ref=e143] [cursor=pointer]:
+                      - generic [ref=e144]: "17"
+                      - button "ISO定期審査" [ref=e146]:
+                        - generic [ref=e147]: ISO定期審査
+                    - generic [ref=e149] [cursor=pointer]: "18"
+                    - generic [ref=e151] [cursor=pointer]: "19"
+                    - generic [ref=e153] [cursor=pointer]: "20"
+                    - generic [ref=e154] [cursor=pointer]:
+                      - generic [ref=e155]: "21"
+                      - button "工務・物流定期MT" [ref=e157]:
+                        - generic [ref=e158]: 工務・物流定期MT
+                    - generic [ref=e160] [cursor=pointer]: "22"
+                    - generic [ref=e161] [cursor=pointer]:
+                      - generic [ref=e162]: "23"
+                      - button "オリジナル日" [ref=e164]:
+                        - generic [ref=e165]: オリジナル日
+                    - generic [ref=e167] [cursor=pointer]: "24"
+                    - generic [ref=e169] [cursor=pointer]: "25"
+                    - generic [ref=e171] [cursor=pointer]: "26"
+                    - generic [ref=e173] [cursor=pointer]: "27"
+                    - generic [ref=e174] [cursor=pointer]:
+                      - generic [ref=e175]: "28"
+                      - generic [ref=e176]:
+                        - button "↑ IMSD報告会" [ref=e177]:
+                          - generic [ref=e178]: ↑
+                          - generic [ref=e179]: IMSD報告会
+                        - button "工務・物流定期MT" [ref=e180]:
+                          - generic [ref=e181]: 工務・物流定期MT
+                    - generic [ref=e182] [cursor=pointer]:
+                      - generic [ref=e183]: "29"
+                      - button "長期休暇_GW" [ref=e185]:
+                        - generic [ref=e186]: 長期休暇_GW
+                    - generic [ref=e187] [cursor=pointer]:
+                      - generic [ref=e188]: "30"
+                      - button "長期休暇_GW" [ref=e190]:
+                        - generic [ref=e191]: 長期休暇_GW
+          - generic [ref=e194]:
+            - generic [ref=e196]: 今後の予定
+            - generic [ref=e198]:
+              - button "IMSD_Server02-ChatBot 4月14日 終日" [ref=e199]:
+                - generic [ref=e201]:
+                  - paragraph [ref=e203]: IMSD_Server02-ChatBot
+                  - generic [ref=e204]:
+                    - generic [ref=e205]: 4月14日
+                    - generic [ref=e206]: 終日
+              - button "zoltraak_ガントチャート機能実装 4月14日 08:00:00〜12:05:00" [ref=e207]:
+                - generic [ref=e209]:
+                  - paragraph [ref=e211]: zoltraak_ガントチャート機能実装
+                  - generic [ref=e212]:
+                    - generic [ref=e213]: 4月14日
+                    - generic [ref=e214]:
+                      - img [ref=e215]
+                      - text: 08:00:00〜12:05:00
+              - button "工務・物流定期MT 4月14日 12:45:00〜13:00:00 会議室" [ref=e218]:
+                - generic [ref=e220]:
+                  - paragraph [ref=e222]: 工務・物流定期MT
+                  - generic [ref=e223]:
+                    - generic [ref=e224]: 4月14日
+                    - generic [ref=e225]:
+                      - img [ref=e226]
+                      - text: 12:45:00〜13:00:00
+                  - paragraph [ref=e229]:
+                    - img [ref=e230]
+                    - generic [ref=e233]: 会議室
+              - button "部内年度計画フォロー 4月14日 13:00:00〜14:00:00 会議室" [ref=e234]:
+                - generic [ref=e236]:
+                  - paragraph [ref=e238]: 部内年度計画フォロー
+                  - generic [ref=e239]:
+                    - generic [ref=e240]: 4月14日
+                    - generic [ref=e241]:
+                      - img [ref=e242]
+                      - text: 13:00:00〜14:00:00
+                  - paragraph [ref=e245]:
+                    - img [ref=e246]
+                    - generic [ref=e249]: 会議室
+              - button "ISO定期審査 4月15日 - 17日 終日" [ref=e250]:
+                - generic [ref=e252]:
+                  - paragraph [ref=e254]: ISO定期審査
+                  - generic [ref=e255]:
+                    - generic [ref=e256]: 4月15日 - 17日
+                    - generic [ref=e257]: 終日
+    - complementary [ref=e258]:
+      - generic [ref=e259]:
+        - generic [ref=e260]:
+          - generic [ref=e261]: AIアシスタント
+          - generic [ref=e262]: スケジュール · 3アクション
+        - button [ref=e265]:
+          - img [ref=e266]
+      - generic [ref=e269]:
+        - combobox [ref=e270]:
+          - option "OpenRouter" [selected]
+          - option "LM Studio"
+        - generic [ref=e271]:
+          - combobox [ref=e272]:
+            - option "Claude Haiku 4"
+            - option "Claude Sonnet 4" [selected]
+            - option "Gemini 2.5 Flash"
+            - option "GPT-4o"
+            - option "GPT-4o Mini"
+          - paragraph [ref=e273]: Loading full model list...
+      - generic [ref=e275]:
+        - paragraph [ref=e276]: 何か相談したいことある？
+        - paragraph [ref=e277]: SNSのことでも、プロジェクトの進捗のことでも。
+      - generic [ref=e278]:
+        - generic [ref=e281]: スケジュールに接続中
+        - generic [ref=e282]:
+          - textbox "スケジュールについて質問や操作を入力..." [ref=e283]
+          - button [disabled] [ref=e284]:
+            - img [ref=e285]
+  - button "Open Next.js Dev Tools" [ref=e293] [cursor=pointer]:
+    - img [ref=e294]
+  - alert [ref=e297]

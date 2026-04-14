@@ -1,6 +1,7 @@
 "use client";
 
 import { useChatStore } from "@/stores/chat-store";
+import { usePageContextStore } from "@/stores/page-context-store";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import { ModelSelector } from "./model-selector";
@@ -8,15 +9,24 @@ import { X, Trash2 } from "lucide-react";
 
 export function ChatPanel() {
   const { isPanelOpen, setPanelOpen, clearMessages, messages } = useChatStore();
+  const { currentPage, pageDescription, availableActions } = usePageContextStore();
 
   if (!isPanelOpen) return null;
 
   return (
     <aside className="flex flex-col w-[360px] shrink-0 h-full bg-sidebar border-l border-sidebar-border">
       <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
-        <span className="text-sm font-semibold text-sidebar-foreground">
-          AIアシスタント
-        </span>
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold text-sidebar-foreground">
+            AIアシスタント
+          </span>
+          {currentPage && (
+            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {pageDescription} &middot; {availableActions.length}アクション
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
             <button

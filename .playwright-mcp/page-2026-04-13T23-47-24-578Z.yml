@@ -1,0 +1,65 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: zoltraak system
+        - button [ref=e6]:
+          - img [ref=e7]
+      - navigation [ref=e10]:
+        - link "ダッシュボード" [ref=e11] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e12]
+          - generic [ref=e17]: ダッシュボード
+        - link "スケジュール" [ref=e18] [cursor=pointer]:
+          - /url: /schedule
+          - img [ref=e19]
+          - generic [ref=e21]: スケジュール
+        - link "ガントチャート" [ref=e22] [cursor=pointer]:
+          - /url: /gantt
+          - img [ref=e23]
+          - generic [ref=e24]: ガントチャート
+      - generic [ref=e25]:
+        - button "設定" [ref=e26]:
+          - img [ref=e27]
+          - generic [ref=e30]: 設定
+        - button "ログイン" [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e35]: ログイン
+    - generic [ref=e36]:
+      - banner [ref=e37]:
+        - button "AI" [ref=e39]:
+          - img [ref=e40]
+          - generic [ref=e42]: AI
+      - main [ref=e43]:
+        - paragraph [ref=e48]: データを読み込み中...
+    - complementary [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e51]:
+          - generic [ref=e52]: AIアシスタント
+          - generic [ref=e53]: ガントチャート · 6アクション
+        - button [ref=e56]:
+          - img [ref=e57]
+      - generic [ref=e60]:
+        - combobox [ref=e61]:
+          - option "OpenRouter" [selected]
+          - option "LM Studio"
+        - generic [ref=e62]:
+          - combobox [ref=e63]:
+            - option "Claude Haiku 4"
+            - option "Claude Sonnet 4" [selected]
+            - option "Gemini 2.5 Flash"
+            - option "GPT-4o"
+            - option "GPT-4o Mini"
+          - paragraph [ref=e64]: Loading full model list...
+      - generic [ref=e66]:
+        - paragraph [ref=e67]: 何か相談したいことある？
+        - paragraph [ref=e68]: SNSのことでも、プロジェクトの進捗のことでも。
+      - generic [ref=e69]:
+        - generic [ref=e72]: ガントチャートに接続中
+        - generic [ref=e73]:
+          - textbox "ガントチャートについて質問や操作を入力..." [ref=e74]
+          - button [disabled] [ref=e75]:
+            - img [ref=e76]
+  - button "Open Next.js Dev Tools" [ref=e84] [cursor=pointer]:
+    - img [ref=e85]
+  - alert [ref=e88]

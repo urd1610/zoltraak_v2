@@ -1,0 +1,61 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: zoltraak system
+        - button [ref=e6]:
+          - img [ref=e7]
+      - navigation [ref=e10]:
+        - link "ダッシュボード" [ref=e11] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e12]
+          - generic [ref=e17]: ダッシュボード
+        - link "スケジュール" [ref=e18] [cursor=pointer]:
+          - /url: /schedule
+          - img [ref=e19]
+          - generic [ref=e21]: スケジュール
+        - link "ガントチャート" [ref=e22] [cursor=pointer]:
+          - /url: /gantt
+          - img [ref=e23]
+          - generic [ref=e24]: ガントチャート
+      - generic [ref=e25]:
+        - button "設定" [ref=e26]:
+          - img [ref=e27]
+          - generic [ref=e30]: 設定
+        - button "ログイン" [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e35]: ログイン
+    - generic [ref=e36]:
+      - banner [ref=e37]:
+        - button "AI" [ref=e39]:
+          - img [ref=e40]
+          - generic [ref=e42]: AI
+      - main [ref=e43]:
+        - paragraph [ref=e48]: データを読み込み中...
+    - complementary [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e51]: AIアシスタント
+        - button [ref=e53]:
+          - img [ref=e54]
+      - generic [ref=e57]:
+        - combobox [ref=e58]:
+          - option "OpenRouter" [selected]
+          - option "LM Studio"
+        - generic [ref=e59]:
+          - combobox [ref=e60]:
+            - option "Claude Haiku 4"
+            - option "Claude Sonnet 4" [selected]
+            - option "Gemini 2.5 Flash"
+            - option "GPT-4o"
+            - option "GPT-4o Mini"
+          - paragraph [ref=e61]: Loading full model list...
+      - generic [ref=e63]:
+        - paragraph [ref=e64]: 何か相談したいことある？
+        - paragraph [ref=e65]: SNSのことでも、プロジェクトの進捗のことでも。
+      - generic [ref=e67]:
+        - textbox "メッセージを入力..." [ref=e68]
+        - button [disabled] [ref=e69]:
+          - img [ref=e70]
+  - button "Open Next.js Dev Tools" [ref=e78] [cursor=pointer]:
+    - img [ref=e79]
+  - alert [ref=e82]

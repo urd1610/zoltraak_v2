@@ -1,0 +1,120 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: zoltraak system
+        - button [ref=e6]:
+          - img [ref=e7]
+      - navigation [ref=e10]:
+        - link "ダッシュボード" [ref=e11] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e12]
+          - generic [ref=e17]: ダッシュボード
+        - link "手順リスト" [ref=e18] [cursor=pointer]:
+          - /url: /procedures
+          - img [ref=e19]
+          - generic [ref=e22]: 手順リスト
+        - link "スケジュール" [ref=e23] [cursor=pointer]:
+          - /url: /schedule
+          - img [ref=e24]
+          - generic [ref=e26]: スケジュール
+        - link "ガントチャート" [ref=e27] [cursor=pointer]:
+          - /url: /gantt
+          - img [ref=e28]
+          - generic [ref=e29]: ガントチャート
+        - link "ロードマップ" [ref=e30] [cursor=pointer]:
+          - /url: /roadmap
+          - img [ref=e31]
+          - generic [ref=e33]: ロードマップ
+        - link "セッション管理" [ref=e34] [cursor=pointer]:
+          - /url: /sessions
+          - img [ref=e35]
+          - generic [ref=e40]: セッション管理
+        - link "ユーザー管理" [ref=e41] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e42]
+          - generic [ref=e54]: ユーザー管理
+        - link "Stripe連携" [ref=e55] [cursor=pointer]:
+          - /url: /stripe
+          - img [ref=e56]
+          - generic [ref=e58]: Stripe連携
+        - link "DB操作" [ref=e59] [cursor=pointer]:
+          - /url: /database
+          - img [ref=e60]
+          - generic [ref=e64]: DB操作
+        - link "メール送信" [ref=e65] [cursor=pointer]:
+          - /url: /email
+          - img [ref=e66]
+          - generic [ref=e69]: メール送信
+        - link "Gmail受信箱" [ref=e70] [cursor=pointer]:
+          - /url: /gmail
+          - img [ref=e71]
+          - generic [ref=e74]: Gmail受信箱
+        - link "配信カレンダー" [ref=e75] [cursor=pointer]:
+          - /url: /calendar
+          - img [ref=e76]
+          - generic [ref=e78]: 配信カレンダー
+        - link "SNS分析" [ref=e79] [cursor=pointer]:
+          - /url: /sns-analytics
+          - img [ref=e80]
+          - generic [ref=e82]: SNS分析
+        - link "採点" [ref=e83] [cursor=pointer]:
+          - /url: /scoring
+          - img [ref=e84]
+          - generic [ref=e87]: 採点
+        - link "ライト" [ref=e88] [cursor=pointer]:
+          - /url: /lite
+          - img [ref=e89]
+          - generic [ref=e91]: ライト
+        - link "ジョブズ" [ref=e92] [cursor=pointer]:
+          - /url: /jobs
+          - img [ref=e93]
+          - generic [ref=e96]: ジョブズ
+        - link "OGP画像" [ref=e97] [cursor=pointer]:
+          - /url: /ogp
+          - img [ref=e98]
+          - generic [ref=e102]: OGP画像
+        - link "要件定義" [ref=e103] [cursor=pointer]:
+          - /url: /requirements
+          - img [ref=e104]
+          - generic [ref=e107]: 要件定義
+      - generic [ref=e108]:
+        - button "設定" [ref=e109]:
+          - img [ref=e110]
+          - generic [ref=e113]: 設定
+        - button "ログイン" [ref=e114]:
+          - img [ref=e115]
+          - generic [ref=e118]: ログイン
+    - generic [ref=e119]:
+      - banner [ref=e120]:
+        - button "AI" [ref=e122]:
+          - img [ref=e123]
+          - generic [ref=e125]: AI
+      - main [ref=e126]:
+        - paragraph [ref=e131]: データを読み込み中...
+    - complementary [ref=e132]:
+      - generic [ref=e133]:
+        - generic [ref=e134]: AIアシスタント
+        - button [ref=e136]:
+          - img [ref=e137]
+      - generic [ref=e140]:
+        - combobox [ref=e141]:
+          - option "OpenRouter" [selected]
+          - option "LM Studio"
+        - generic [ref=e142]:
+          - combobox [ref=e143]:
+            - option "Claude Haiku 4"
+            - option "Claude Sonnet 4" [selected]
+            - option "Gemini 2.5 Flash"
+            - option "GPT-4o"
+            - option "GPT-4o Mini"
+          - paragraph [ref=e144]: Using 5 fallback models
+      - generic [ref=e146]:
+        - paragraph [ref=e147]: 何か相談したいことある？
+        - paragraph [ref=e148]: SNSのことでも、プロジェクトの進捗のことでも。
+      - generic [ref=e150]:
+        - textbox "メッセージを入力..." [ref=e151]
+        - button [disabled] [ref=e152]:
+          - img [ref=e153]
+  - button "Open Next.js Dev Tools" [ref=e161] [cursor=pointer]:
+    - img [ref=e162]

@@ -2,7 +2,11 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import { usePageContextStore } from "@/stores/page-context-store";
 import { createId } from "@/lib/utils";
+import { buildSystemPrompt } from "@/lib/ai/system-prompt";
+import { parseActions, executeAction, stripActionBlocks } from "@/lib/ai/action-executor";
+import type { ActionResult } from "@/lib/ai/action-executor";
 import type { ChatCompletionChunk } from "@/types/ai";
 import { Send, Square } from "lucide-react";
 
@@ -24,7 +28,6 @@ function getSseEventData(rawEvent: string) {
 export function ChatInput() {
   const [input, setInput] = useState("");
   const abortRef = useRef<AbortController | null>(null);
-  /** IME 変換中・確定直後は Enter で送信しない（compositionEnd が keydown より先に来る環境対策） */
   const imeComposingRef = useRef(false);
   const {
     isStreaming,
@@ -39,6 +42,9 @@ export function ChatInput() {
     resetStream,
     setError,
   } = useChatStore();
+
+  const { currentPage, pageDescription, pageData, availableActions, triggerRefresh } =
+    usePageContextStore();
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -56,10 +62,20 @@ export function ChatInput() {
 
     startStream();
 
-    const allMessages = [...messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Build system prompt with page context
+    const systemPrompt = buildSystemPrompt(
+      currentPage
+        ? { currentPage, pageDescription, pageData, availableActions }
+        : null
+    );
+
+    const allMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...[...messages, userMsg].map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    ];
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -146,6 +162,37 @@ export function ChatInput() {
       }
 
       finalizeStream(selectedModel, selectedProvider);
+
+      // After stream finalized, check for action blocks in the completed content
+      const finalContent = useChatStore.getState().messages.at(-1)?.content ?? "";
+      const actionCalls = parseActions(finalContent);
+
+      if (actionCalls.length > 0) {
+        const results: ActionResult[] = [];
+        for (const call of actionCalls) {
+          const result = await executeAction(call);
+          results.push(result);
+        }
+
+        // Add action result message
+        const resultLines = results.map((r) =>
+          r.success
+            ? `✅ ${r.message}`
+            : `❌ ${r.message}`
+        );
+
+        const resultMsg = {
+          id: createId(),
+          role: "assistant" as const,
+          content: resultLines.join("\n"),
+          timestamp: Date.now(),
+          isActionResult: true,
+        };
+        addMessage(resultMsg);
+
+        // Trigger page data refresh
+        triggerRefresh();
+      }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         resetStream();
@@ -154,7 +201,7 @@ export function ChatInput() {
     } finally {
       abortRef.current = null;
     }
-  }, [input, isStreaming, messages, selectedModel, selectedProvider, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError]);
+  }, [input, isStreaming, messages, selectedModel, selectedProvider, currentPage, pageDescription, pageData, availableActions, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError, triggerRefresh]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -176,6 +223,12 @@ export function ChatInput() {
           {error}
         </p>
       )}
+      {currentPage && (
+        <div className="mb-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>{pageDescription}に接続中</span>
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <textarea
           value={input}
@@ -189,7 +242,11 @@ export function ChatInput() {
             });
           }}
           onKeyDown={handleKeyDown}
-          placeholder="メッセージを入力..."
+          placeholder={
+            currentPage
+              ? `${pageDescription}について質問や操作を入力...`
+              : "メッセージを入力..."
+          }
           rows={1}
           className="flex-1 resize-none bg-sidebar-accent border border-sidebar-border rounded-lg px-3 py-2 text-sm text-sidebar-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary min-h-[36px] max-h-[120px]"
           style={{ height: "auto", overflow: "hidden" }}
