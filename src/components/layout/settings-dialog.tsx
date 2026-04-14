@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { Shield } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Shield, ArrowUp, ArrowDown } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -32,6 +32,13 @@ const allNavItems = [
   { label: "要件定義", href: "/requirements" },
   { label: "Server02", href: "/server02" },
 ];
+
+type OrderedNavItem = {
+  label: string;
+  href: string;
+  sort_order: number;
+  defaultOrder: number;
+};
 
 function Toggle({
   active,
@@ -89,12 +96,35 @@ export function SettingsDialog() {
 
   const canEdit = isLoggedIn && isEditorOrAdmin();
   const canToggleAdminOnly = isLoggedIn && isAdmin();
+  const [orderedNavItems, setOrderedNavItems] = useState<OrderedNavItem[]>([]);
 
   useEffect(() => {
     if (isSettingsOpen) {
       fetchNavSettings();
     }
   }, [isSettingsOpen, fetchNavSettings]);
+
+  useEffect(() => {
+    const ordered = allNavItems
+      .map((item, index) => {
+        const setting = navSettings.find((s) => s.nav_href === item.href);
+        return {
+          label: item.label,
+          href: item.href,
+          sort_order:
+            typeof setting?.sort_order === "number" ? setting.sort_order : index,
+          defaultOrder: index,
+        };
+      })
+      .sort((a, b) => {
+        if (a.sort_order === b.sort_order) {
+          return a.defaultOrder - b.defaultOrder;
+        }
+        return a.sort_order - b.sort_order;
+      });
+
+    setOrderedNavItems(ordered);
+  }, [navSettings]);
 
   const handleToggleHidden = async (nav_href: string, currentIsHidden: boolean) => {
     const headers = { "Content-Type": "application/json", ...getAuthHeaders() };
@@ -122,6 +152,35 @@ export function SettingsDialog() {
     } catch {
       // silent
     }
+  };
+
+  const persistNavOrder = async (items: OrderedNavItem[]) => {
+    const headers = { "Content-Type": "application/json", ...getAuthHeaders() };
+    try {
+      await Promise.all(
+        items.map((item, index) =>
+          fetch("/api/nav-visibility", {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ nav_href: item.href, sort_order: index }),
+          }),
+        ),
+      );
+      await fetchNavSettings();
+    } catch {
+      await fetchNavSettings();
+    }
+  };
+
+  const moveNavItem = async (index: number, direction: -1 | 1) => {
+    if (!canEdit) return;
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= orderedNavItems.length) return;
+
+    const next = [...orderedNavItems];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    setOrderedNavItems(next);
+    await persistNavOrder(next);
   };
 
   return (
@@ -170,10 +229,11 @@ export function SettingsDialog() {
             <div className="flex items-center justify-end gap-6 px-3 pb-1">
               <span className="text-[10px] text-muted-foreground w-10 text-center">表示</span>
               <span className="text-[10px] text-muted-foreground w-10 text-center">管理者のみ</span>
+              <span className="text-[10px] text-muted-foreground w-16 text-center">並び順</span>
             </div>
 
             <div className="rounded-md border border-border bg-popover divide-y divide-border">
-              {allNavItems.map((item) => {
+              {orderedNavItems.map((item, index) => {
                 const setting = navSettings.find((s) => s.nav_href === item.href);
                 const isHidden = setting?.is_hidden ?? false;
                 const adminOnly = setting?.admin_only ?? false;
@@ -208,6 +268,25 @@ export function SettingsDialog() {
                         onToggle={() => handleToggleAdminOnly(item.href, adminOnly)}
                         disabled={!canToggleAdminOnly}
                       />
+
+                      <button
+                        type="button"
+                        disabled={!canEdit || index === 0}
+                        onClick={() => moveNavItem(index, -1)}
+                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        title="上へ移動"
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEdit || index === orderedNavItems.length - 1}
+                        onClick={() => moveNavItem(index, 1)}
+                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        title="下へ移動"
+                      >
+                        <ArrowDown size={14} />
+                      </button>
                     </div>
                   </div>
                 );

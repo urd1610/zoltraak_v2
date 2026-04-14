@@ -14,6 +14,7 @@ export interface NavVisibilitySetting {
   nav_href: string;
   admin_only: boolean;
   is_hidden: boolean;
+  sort_order?: number | null;
 }
 
 interface SettingsState {

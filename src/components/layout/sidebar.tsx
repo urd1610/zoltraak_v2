@@ -67,7 +67,26 @@ export function Sidebar() {
     fetchNavSettings();
   }, [fetchNavSettings]);
 
-  const visibleNavItems = navItems.filter((item) => {
+  const sortedNavItems = React.useMemo(() => {
+    return navItems
+      .map((item, index) => {
+        const setting = navSettings.find((s) => s.nav_href === item.href);
+        return {
+          ...item,
+          sort_order:
+            typeof setting?.sort_order === "number" ? setting.sort_order : index,
+          defaultOrder: index,
+        };
+      })
+      .sort((a, b) => {
+        if (a.sort_order === b.sort_order) {
+          return a.defaultOrder - b.defaultOrder;
+        }
+        return a.sort_order - b.sort_order;
+      });
+  }, [navSettings]);
+
+  const visibleNavItems = sortedNavItems.filter((item) => {
     const setting = navSettings.find((s) => s.nav_href === item.href);
     if (!setting) return true;
     if (setting.is_hidden) return false;
