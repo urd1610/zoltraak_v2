@@ -13,7 +13,7 @@ interface Props {
 
 /** Hide ```action ... ``` blocks from displayed content */
 function cleanDisplayContent(content: string): string {
-  return content.replace(/```action\s*\n[\s\S]*?```/g, "").trim();
+  return content.replace(/```action\s*\n?[\s\S]*?```/g, "").trim();
 }
 
 export function MessageBubble({ message, isStreaming }: Props) {
