@@ -193,6 +193,9 @@ export default function Server02Page() {
   const [extensions, setExtensions] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<string>("");
+  const [scanShareIndex, setScanShareIndex] = useState(0);
+  const [scanTotalShares, setScanTotalShares] = useState(0);
+  const [scanShareResults, setScanShareResults] = useState<string[]>([]);
 
   const [browseRoot, setBrowseRoot] = useState<DirectoryTreeNode[]>([]);
   const [browseShare, setBrowseShare] = useState("");
@@ -270,6 +273,9 @@ export default function Server02Page() {
   const handleScan = async (targetShare?: string) => {
     setIsScanning(true);
     setScanProgress("スキャンを開始しています...");
+    setScanShareIndex(0);
+    setScanTotalShares(0);
+    setScanShareResults([]);
 
     try {
       const body = targetShare ? { share: targetShare } : {};
@@ -279,19 +285,53 @@ export default function Server02Page() {
         body: JSON.stringify(body),
       });
 
-      const result = await response.json();
-      setScanProgress(
-        `完了: ${result.totalFiles} ファイル, ${result.totalDirectories} フォルダ, ${formatFileSize(result.totalSize)}`
-      );
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
 
-      // Refresh stats
-      await fetchStats();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      setTimeout(() => setScanProgress(""), 3000);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const dataLine = line.replace(/^data: /, "").trim();
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine);
+
+            if (event.type === "progress") {
+              setScanProgress(event.message);
+              setScanShareIndex(event.shareIndex);
+              setScanTotalShares(event.totalShares);
+              if (event.phase === "done") {
+                setScanShareResults((prev) => [...prev, event.message]);
+              }
+            } else if (event.type === "complete") {
+              setScanProgress(event.message);
+              await fetchStats();
+              setTimeout(() => {
+                setScanProgress("");
+                setScanShareResults([]);
+              }, 5000);
+            } else if (event.type === "error") {
+              setScanProgress(event.message);
+              setTimeout(() => setScanProgress(""), 5000);
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
     } catch (error) {
       console.error("Scan failed:", error);
       setScanProgress("スキャンに失敗しました");
-      setTimeout(() => setScanProgress(""), 3000);
+      setTimeout(() => setScanProgress(""), 5000);
     } finally {
       setIsScanning(false);
     }
@@ -385,9 +425,44 @@ export default function Server02Page() {
       </div>
 
       {/* Scan Progress / Status */}
-      {scanProgress && (
-        <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 px-4 py-3 text-sm text-blue-300">
-          {scanProgress}
+      {(isScanning || scanProgress) && (
+        <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 px-4 py-4 space-y-3">
+          {/* Progress bar */}
+          {isScanning && scanTotalShares > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-blue-300">
+                <span>
+                  {scanShareIndex + 1} / {scanTotalShares} 共有フォルダ
+                </span>
+                <span>
+                  {Math.round(((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100)}%
+                </span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-blue-500/20 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all duration-500 ease-out"
+                  style={{
+                    width: `${((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Current status message */}
+          <div className="text-sm text-blue-300">{scanProgress}</div>
+
+          {/* Completed shares log */}
+          {scanShareResults.length > 0 && (
+            <div className="space-y-1 text-xs text-blue-300/70 border-t border-blue-500/20 pt-2 max-h-32 overflow-y-auto">
+              {scanShareResults.map((result, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="text-green-400">✓</span>
+                  {result}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

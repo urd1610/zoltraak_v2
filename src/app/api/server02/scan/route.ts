@@ -100,93 +100,160 @@ async function scanDirectory(
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const targetShare = body.share || null; // optional: scan specific share only
-    const maxDepth = body.maxDepth || 10;
+  const body = await req.json().catch(() => ({}));
+  const targetShare = body.share || null;
+  const maxDepth = body.maxDepth || 10;
 
-    const connection = await pool.getConnection();
-    try {
-      // Create scan log
-      const [logResult] = await connection.execute<any>(
-        "INSERT INTO server02_scan_logs (share_name, status) VALUES (?, 'running')",
-        [targetShare]
-      );
-      const scanId = logResult.insertId;
+  const sharesToScan = targetShare
+    ? SHARES.filter((s) => s.name === targetShare)
+    : SHARES;
 
-      const sharesToScan = targetShare
-        ? SHARES.filter((s) => s.name === targetShare)
-        : SHARES;
-
-      let totalFiles = 0;
-      let totalDirs = 0;
-      let totalSize = 0;
-
-      for (const share of sharesToScan) {
-        const mounted = await mountShare(share.name);
-        if (!mounted) continue;
-
-        // Clear existing entries for this share
-        await connection.execute("DELETE FROM server02_files WHERE share_name = ?", [share.name]);
-
-        const files: any[] = [];
-        await scanDirectory(share.mountPath, share.name, 0, files, maxDepth);
-
-        // Batch insert
-        if (files.length > 0) {
-          const batchSize = 500;
-          for (let i = 0; i < files.length; i += batchSize) {
-            const batch = files.slice(i, i + batchSize);
-            const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
-            const values = batch.flatMap((f) => [
-              f.share_name,
-              f.file_path,
-              f.file_name,
-              f.extension,
-              f.file_size,
-              f.modified_at,
-              f.is_directory ? 1 : 0,
-              f.depth,
-              f.parent_path,
-            ]);
-
-            await connection.execute(
-              `INSERT INTO server02_files (share_name, file_path, file_name, extension, file_size, modified_at, is_directory, depth, parent_path) VALUES ${placeholders}`,
-              values
-            );
-          }
-        }
-
-        const fileCount = files.filter((f) => !f.is_directory).length;
-        const dirCount = files.filter((f) => f.is_directory).length;
-        const sizeSum = files.reduce((sum, f) => sum + f.file_size, 0);
-
-        totalFiles += fileCount;
-        totalDirs += dirCount;
-        totalSize += sizeSum;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      function send(data: Record<string, unknown>) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
 
-      // Update scan log
-      await connection.execute(
-        "UPDATE server02_scan_logs SET status = 'completed', total_files = ?, total_directories = ?, total_size = ?, completed_at = NOW() WHERE id = ?",
-        [totalFiles, totalDirs, totalSize, scanId]
-      );
+      const connection = await pool.getConnection();
+      try {
+        const [logResult] = await connection.execute<any>(
+          "INSERT INTO server02_scan_logs (share_name, status) VALUES (?, 'running')",
+          [targetShare]
+        );
+        const scanId = logResult.insertId;
 
-      return NextResponse.json({
-        scanId,
-        status: "completed",
-        totalFiles,
-        totalDirectories: totalDirs,
-        totalSize,
-      });
-    } finally {
-      connection.release();
-    }
-  } catch (error: any) {
-    const message =
-      error instanceof Error ? error.message : "Failed to scan shares";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+        let totalFiles = 0;
+        let totalDirs = 0;
+        let totalSize = 0;
+        const totalShares = sharesToScan.length;
+
+        for (let idx = 0; idx < totalShares; idx++) {
+          const share = sharesToScan[idx];
+
+          send({
+            type: "progress",
+            phase: "mounting",
+            shareIndex: idx,
+            totalShares,
+            shareName: share.name,
+            message: `${share.name} をマウント中...`,
+          });
+
+          const mounted = await mountShare(share.name);
+          if (!mounted) {
+            send({
+              type: "progress",
+              phase: "skipped",
+              shareIndex: idx,
+              totalShares,
+              shareName: share.name,
+              message: `${share.name} — マウント失敗、スキップ`,
+            });
+            continue;
+          }
+
+          send({
+            type: "progress",
+            phase: "scanning",
+            shareIndex: idx,
+            totalShares,
+            shareName: share.name,
+            message: `${share.name} をスキャン中...`,
+          });
+
+          await connection.execute("DELETE FROM server02_files WHERE share_name = ?", [share.name]);
+
+          const files: any[] = [];
+          await scanDirectory(share.mountPath, share.name, 0, files, maxDepth);
+
+          send({
+            type: "progress",
+            phase: "indexing",
+            shareIndex: idx,
+            totalShares,
+            shareName: share.name,
+            fileCount: files.length,
+            message: `${share.name} — ${files.length} 件をDB登録中...`,
+          });
+
+          if (files.length > 0) {
+            const batchSize = 500;
+            for (let i = 0; i < files.length; i += batchSize) {
+              const batch = files.slice(i, i + batchSize);
+              const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
+              const values = batch.flatMap((f) => [
+                f.share_name,
+                f.file_path,
+                f.file_name,
+                f.extension,
+                f.file_size,
+                f.modified_at,
+                f.is_directory ? 1 : 0,
+                f.depth,
+                f.parent_path,
+              ]);
+
+              await connection.execute(
+                `INSERT INTO server02_files (share_name, file_path, file_name, extension, file_size, modified_at, is_directory, depth, parent_path) VALUES ${placeholders}`,
+                values
+              );
+            }
+          }
+
+          const fileCount = files.filter((f) => !f.is_directory).length;
+          const dirCount = files.filter((f) => f.is_directory).length;
+          const sizeSum = files.reduce((sum, f) => sum + f.file_size, 0);
+
+          totalFiles += fileCount;
+          totalDirs += dirCount;
+          totalSize += sizeSum;
+
+          send({
+            type: "progress",
+            phase: "done",
+            shareIndex: idx,
+            totalShares,
+            shareName: share.name,
+            fileCount,
+            dirCount,
+            size: sizeSum,
+            message: `${share.name} 完了 — ${fileCount} ファイル, ${dirCount} フォルダ`,
+          });
+        }
+
+        await connection.execute(
+          "UPDATE server02_scan_logs SET status = 'completed', total_files = ?, total_directories = ?, total_size = ?, completed_at = NOW() WHERE id = ?",
+          [totalFiles, totalDirs, totalSize, scanId]
+        );
+
+        send({
+          type: "complete",
+          scanId,
+          totalFiles,
+          totalDirectories: totalDirs,
+          totalSize,
+          message: `全スキャン完了 — ${totalFiles} ファイル, ${totalDirs} フォルダ`,
+        });
+      } catch (error: any) {
+        send({
+          type: "error",
+          message: error instanceof Error ? error.message : "スキャン中にエラーが発生しました",
+        });
+      } finally {
+        connection.release();
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 // GET: return scan status and stats
