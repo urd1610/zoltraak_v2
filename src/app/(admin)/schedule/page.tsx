@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePageContextStore } from "@/stores/page-context-store";
 import type { PageAction } from "@/stores/page-context-store";
 import {
@@ -44,6 +44,23 @@ interface ApiEvent {
 
 type CalendarEvent = ApiEvent;
 type CalendarView = "month" | "week";
+
+const MINUTES_PER_DAY = 24 * 60;
+const WEEK_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const WEEK_SLOT_HEIGHT = 64;
+const WEEK_PIXELS_PER_MINUTE = WEEK_SLOT_HEIGHT / 60;
+const WEEK_DEFAULT_FOCUS_HOUR = 8;
+const WEEK_ACTIVE_HOURS = { start: 8, end: 19 };
+
+interface WeekTimedSegment {
+  event: CalendarEvent;
+  startMinute: number;
+  endMinute: number;
+  lane: number;
+  laneCount: number;
+  continuesEarlier: boolean;
+  continuesLater: boolean;
+}
 
 /** Build "YYYY-MM-DD" from year, month, day */
 function toDateStr(year: number, month: number, day: number): string {
@@ -89,6 +106,10 @@ function formatEventTimeSnippet(event: CalendarEvent): string | null {
   return null;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function parseDateParts(dateStr: string) {
   const [year, month, day] = dateStr.split("-").map(Number);
   return { year, month, day };
@@ -103,6 +124,28 @@ function createLocalDateTime(dateStr: string, timeStr: string) {
 function createLocalEndOfDay(dateStr: string) {
   const { year, month, day } = parseDateParts(dateStr);
   return new Date(year, month - 1, day, 23, 59, 59, 999);
+}
+
+function getMinutesOfDay(date: Date) {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function minutesToTimeInput(minutes: number) {
+  const normalized = clamp(minutes, 0, MINUTES_PER_DAY - 1);
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function minutesToTimeLabel(minutes: number) {
+  if (minutes >= MINUTES_PER_DAY) {
+    return "24:00";
+  }
+  return minutesToTimeInput(minutes);
+}
+
+function formatHourLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 function getEventTimeRange(event: CalendarEvent) {
@@ -122,6 +165,74 @@ function getEventTimeRange(event: CalendarEvent) {
 function isEventActiveNow(event: CalendarEvent, now: Date): boolean {
   const { start, end } = getEventTimeRange(event);
   return start <= now && now <= end;
+}
+
+function buildTimedSegmentsForDate(events: CalendarEvent[], dateStr: string): WeekTimedSegment[] {
+  const dayStart = createLocalDateTime(dateStr, "00:00");
+  const nextDayStart = addDays(dayStart, 1);
+
+  const rawSegments = events.flatMap((event) => {
+    if (event.is_all_day || !eventCoversDate(event, dateStr)) {
+      return [];
+    }
+
+    const { start, end } = getEventTimeRange(event);
+    if (end <= dayStart || start >= nextDayStart) {
+      return [];
+    }
+
+    const segmentStart = start > dayStart ? start : dayStart;
+    const segmentEnd = end < nextDayStart ? end : nextDayStart;
+    const startMinute = clamp(
+      Math.floor((segmentStart.getTime() - dayStart.getTime()) / 60_000),
+      0,
+      MINUTES_PER_DAY - 1
+    );
+    const endMinute = clamp(
+      Math.ceil((segmentEnd.getTime() - dayStart.getTime()) / 60_000),
+      startMinute + 15,
+      MINUTES_PER_DAY
+    );
+
+    return [
+      {
+        event,
+        startMinute,
+        endMinute,
+        continuesEarlier: start < dayStart,
+        continuesLater: end > nextDayStart,
+      },
+    ];
+  });
+
+  const laneEndMinutes: number[] = [];
+  const assignedSegments = [...rawSegments]
+    .sort(
+      (a, b) =>
+        a.startMinute - b.startMinute ||
+        a.endMinute - b.endMinute ||
+        a.event.id - b.event.id
+    )
+    .map((segment) => {
+      let lane = laneEndMinutes.findIndex((endMinute) => endMinute <= segment.startMinute);
+      if (lane === -1) {
+        lane = laneEndMinutes.length;
+        laneEndMinutes.push(segment.endMinute);
+      } else {
+        laneEndMinutes[lane] = segment.endMinute;
+      }
+
+      return {
+        ...segment,
+        lane,
+      };
+    });
+
+  const laneCount = Math.max(1, laneEndMinutes.length);
+  return assignedSegments.map((segment) => ({
+    ...segment,
+    laneCount,
+  }));
 }
 
 const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
@@ -236,6 +347,8 @@ function getWeekRange(startDate: Date) {
 export default function SchedulePage() {
   const [todayForHighlight, setTodayForHighlight] = useState<LocalDate | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const weekTimelineRef = useRef<HTMLDivElement | null>(null);
+  const weekAutoScrollKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const syncNow = () => {
       setTodayForHighlight(readLocalToday());
@@ -429,12 +542,96 @@ export default function SchedulePage() {
     selectedCategory === "すべて"
       ? events
       : events.filter((e) => e.category === selectedCategory);
+  const weekStartStr = toDateStr(
+    weekRange.startDate.getFullYear(),
+    weekRange.startDate.getMonth() + 1,
+    weekRange.startDate.getDate()
+  );
+  const weekEndStr = toDateStr(
+    weekRange.endDate.getFullYear(),
+    weekRange.endDate.getMonth() + 1,
+    weekRange.endDate.getDate()
+  );
+  const weekDays = Array.from({ length: 7 }, (_, dayOffset) => {
+    const date = addDays(weekRange.startDate, dayOffset);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const dateStr = toDateStr(date.getFullYear(), month, day);
+    const isToday =
+      todayForHighlight !== null &&
+      date.getFullYear() === todayForHighlight.year &&
+      month === todayForHighlight.month &&
+      day === todayForHighlight.day;
+
+    return {
+      key: dateStr,
+      date,
+      month,
+      day,
+      dayName: daysOfWeek[date.getDay()],
+      dateStr,
+      isToday,
+      isWeekend: date.getDay() === 0 || date.getDay() === 6,
+      allDayEvents: filteredEvents.filter(
+        (event) => event.is_all_day && eventCoversDate(event, dateStr)
+      ),
+      timedSegments: buildTimedSegmentsForDate(filteredEvents, dateStr),
+    };
+  });
+  const timedWeekEventCount = weekDays.reduce(
+    (total, day) => total + day.timedSegments.length,
+    0
+  );
+  const allDayWeekEventCount = weekDays.reduce(
+    (total, day) => total + day.allDayEvents.length,
+    0
+  );
+  const currentTimeMinutes = getMinutesOfDay(now);
 
   const isCurrentMonth =
     todayForHighlight !== null &&
     currentYear === todayForHighlight.year &&
     currentMonth === todayForHighlight.month;
   const todayDay = isCurrentMonth ? todayForHighlight.day : null;
+
+  useEffect(() => {
+    if (viewMode !== "week" || !weekTimelineRef.current) {
+      return;
+    }
+
+    if (weekAutoScrollKeyRef.current === weekStartStr) {
+      return;
+    }
+
+    const todayStr = toDateStr(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    const viewingCurrentWeek = todayStr >= weekStartStr && todayStr <= weekEndStr;
+    const earliestTimedMinute = Math.min(
+      ...weekDays.flatMap((day) => day.timedSegments.map((segment) => segment.startMinute)),
+      WEEK_DEFAULT_FOCUS_HOUR * 60
+    );
+    const targetMinute = viewingCurrentWeek
+      ? currentTimeMinutes
+      : Math.max(Math.min(earliestTimedMinute, WEEK_DEFAULT_FOCUS_HOUR * 60) - 30, 0);
+    const scrollTop = Math.max(
+      targetMinute * WEEK_PIXELS_PER_MINUTE - weekTimelineRef.current.clientHeight * 0.22,
+      0
+    );
+
+    weekTimelineRef.current.scrollTo({ top: scrollTop, behavior: "smooth" });
+    weekAutoScrollKeyRef.current = weekStartStr;
+  }, [currentTimeMinutes, now, viewMode, weekDays, weekEndStr, weekStartStr]);
+
+  const scrollWeekTimelineToMinute = (minute: number) => {
+    if (!weekTimelineRef.current) {
+      return;
+    }
+
+    const scrollTop = Math.max(
+      minute * WEEK_PIXELS_PER_MINUTE - weekTimelineRef.current.clientHeight * 0.22,
+      0
+    );
+    weekTimelineRef.current.scrollTo({ top: scrollTop, behavior: "smooth" });
+  };
 
   const handleEventClick = (event: CalendarEvent) => {
     setSelectedEvent(event);
@@ -474,6 +671,44 @@ export default function SchedulePage() {
       start_date: dateStr,
       end_date: dateStr,
       is_all_day: false,
+      start_time: "",
+      end_time: "",
+      category: "会議",
+      location: "",
+      priority: "medium",
+      description: "",
+      recurrence_type: "none",
+      recurrence_end_date: "",
+    });
+  };
+
+  const handleWeekSlotDoubleClick = (dateStr: string, startMinute: number) => {
+    setShowAddModal(true);
+    setShowEditModal(false);
+    setFormData({
+      title: "",
+      start_date: dateStr,
+      end_date: dateStr,
+      is_all_day: false,
+      start_time: minutesToTimeInput(startMinute),
+      end_time: minutesToTimeInput(Math.min(startMinute + 60, MINUTES_PER_DAY - 1)),
+      category: "会議",
+      location: "",
+      priority: "medium",
+      description: "",
+      recurrence_type: "none",
+      recurrence_end_date: "",
+    });
+  };
+
+  const handleWeekAllDayDoubleClick = (dateStr: string) => {
+    setShowAddModal(true);
+    setShowEditModal(false);
+    setFormData({
+      title: "",
+      start_date: dateStr,
+      end_date: dateStr,
+      is_all_day: true,
       start_time: "",
       end_time: "",
       category: "会議",
@@ -849,11 +1084,16 @@ export default function SchedulePage() {
         <TabsContent value="week">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>
-                  {currentYear}年 {weekRange.startMonth}月{weekRange.startDay}日 - {weekRange.endMonth}月{weekRange.endDay}日
-                </CardTitle>
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <CardTitle>
+                    {currentYear}年 {weekRange.startMonth}月{weekRange.startDay}日 - {weekRange.endMonth}月{weekRange.endDay}日
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    24時間表示に対応しました。空き時間をダブルクリックすると、その時刻で予定を作成できます。
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={handlePreviousWeek}
                     className="rounded-md p-1.5 transition-colors hover:bg-muted"
@@ -872,106 +1112,224 @@ export default function SchedulePage() {
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
+                  <button
+                    onClick={() => scrollWeekTimelineToMinute(WEEK_DEFAULT_FOCUS_HOUR * 60)}
+                    className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  >
+                    08:00
+                  </button>
+                  <button
+                    onClick={() => scrollWeekTimelineToMinute(currentTimeMinutes)}
+                    className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  >
+                    現在
+                  </button>
+                  <button
+                    onClick={() => scrollWeekTimelineToMinute(18 * 60)}
+                    className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  >
+                    18:00
+                  </button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <div className="flex gap-2 min-w-full">
-                  {/* Time column */}
-                  <div className="flex-shrink-0 w-16">
-                    <div className="h-12" />
-                    {Array.from({ length: 10 }).map((_, i) => {
-                      const hour = 9 + i;
-                      return (
-                        <div
-                          key={hour}
-                          className="h-16 border-b border-border text-xs font-medium text-muted-foreground text-right pr-2 py-1"
-                        >
-                          {String(hour).padStart(2, "0")}:00
-                        </div>
-                      );
-                    })}
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="secondary" className="border border-border/50 bg-muted/40">
+                  24時間タイムライン
+                </Badge>
+                <span>{timedWeekEventCount}件の時間指定予定</span>
+                <span>•</span>
+                <span>{allDayWeekEventCount}件の終日予定</span>
+                <span>•</span>
+                <span>現在時刻ライン付き</span>
+              </div>
+
+              <div
+                ref={weekTimelineRef}
+                className="max-h-[72vh] overflow-auto overscroll-contain rounded-xl border border-border/60 bg-background/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
+              >
+                <div className="grid min-w-[1120px] grid-cols-[88px_repeat(7,minmax(150px,1fr))]">
+                  <div className="sticky left-0 top-0 z-40 flex h-16 items-center justify-end border-b border-r border-border/60 bg-card/95 px-3 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground backdrop-blur">
+                    時間
                   </div>
+                  {weekDays.map((day) => (
+                    <div
+                      key={`${day.key}-header`}
+                      className={cn(
+                        "sticky top-0 z-30 flex h-16 flex-col items-center justify-center gap-1 border-b border-l border-border/60 px-2 text-center backdrop-blur",
+                        day.isToday
+                          ? "bg-primary/10"
+                          : day.isWeekend
+                            ? "bg-card/95 text-muted-foreground"
+                            : "bg-card/95"
+                      )}
+                    >
+                      <div className={cn("text-sm font-semibold", day.isToday && "text-primary")}>
+                        {day.month}月{day.day}日
+                      </div>
+                      <div className="text-xs text-muted-foreground">{day.dayName}</div>
+                    </div>
+                  ))}
 
-                  {/* Days columns */}
-                  {Array.from({ length: 7 }).map((_, dayOffset) => {
-                    const date = new Date(weekRange.startDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-                    const day = date.getDate();
-                    const month = date.getMonth() + 1;
-                    const dayNameIndex = date.getDay();
-                    const dayName = daysOfWeek[dayNameIndex];
-                    const dateStr = toDateStr(date.getFullYear(), month, day);
-                    const dayEvents = filteredEvents.filter((e) => eventCoversDate(e, dateStr));
-
-                    return (
-                      <div
-                        key={dayOffset}
-                        className="flex-1 min-w-max border-l border-border"
-                      >
-                        <div className="h-12 border-b border-border p-2 text-center">
-                          <div className="text-sm font-medium">{month}月{day}日</div>
-                          <div className="text-xs text-muted-foreground">
-                            {dayName}
-                          </div>
-                        </div>
-
-                        <div className="relative">
-                          {Array.from({ length: 10 }).map((_, i) => {
-                            const hour = 9 + i;
-                            return (
-                              <div
-                                key={hour}
-                                className="h-16 border-b border-border/50"
-                              />
-                            );
-                          })}
-
-                          {/* Events positioned absolutely */}
-                          {dayEvents.map((event) => {
-                            const pi = priorityMap[event.priority];
-                            const urgentRing = event.priority === "urgent" ? "ring-1 ring-red-400" : "";
-                            const icon = pi && event.priority !== "medium" ? pi.icon : null;
-                            if (event.is_all_day || !event.start_time) {
+                  <div className="sticky left-0 top-16 z-30 flex min-h-14 items-start justify-end border-b border-r border-border/60 bg-card/95 px-3 py-3 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground backdrop-blur">
+                    終日
+                  </div>
+                  {weekDays.map((day) => (
+                    <div
+                      key={`${day.key}-all-day`}
+                      onDoubleClick={() => handleWeekAllDayDoubleClick(day.dateStr)}
+                      className={cn(
+                        "sticky top-16 z-20 min-h-14 border-b border-l border-border/60 px-2 py-2 backdrop-blur",
+                        day.isToday
+                          ? "bg-primary/10"
+                          : day.isWeekend
+                            ? "bg-card/90"
+                            : "bg-card/80"
+                      )}
+                    >
+                      <div className="space-y-1">
+                        {day.allDayEvents.length > 0 ? (
+                          <>
+                            {day.allDayEvents.slice(0, 2).map((event) => {
+                              const pi = priorityMap[event.priority];
                               return (
                                 <button
                                   key={event.id}
                                   onClick={() => handleEventClick(event)}
-                                  className={`absolute left-1 right-1 rounded px-1.5 py-1 text-xs font-medium text-white ${event.color} transition-opacity hover:opacity-80 ${urgentRing}`}
-                                  style={{ top: "4px", height: "24px" }}
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                  className={cn(
+                                    "flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] font-medium text-white transition-transform hover:-translate-y-px hover:opacity-95",
+                                    event.color,
+                                    event.priority === "urgent" && "ring-1 ring-red-400"
+                                  )}
                                 >
-                                  <div className="flex items-center gap-0.5 truncate text-left">
-                                    {icon && <span className="shrink-0 opacity-90">{icon}</span>}
-                                    <span className="truncate">{event.title}（終日）</span>
-                                  </div>
+                                  {pi && event.priority !== "medium" && (
+                                    <span className="shrink-0 opacity-90">{pi.icon}</span>
+                                  )}
+                                  <span className="truncate">{event.title}</span>
                                 </button>
                               );
-                            }
-                            const [hours] = event.start_time.split(":").map(Number);
-                            const offsetFromNine = hours - 9;
-                            const topOffset = offsetFromNine * 64;
-
-                            return (
-                              <button
-                                key={event.id}
-                                onClick={() => handleEventClick(event)}
-                                className={`absolute left-1 right-1 rounded px-1.5 py-1 text-xs font-medium text-white ${event.color} transition-opacity hover:opacity-80 ${urgentRing}`}
-                                style={{
-                                  top: `${48 + topOffset}px`,
-                                  height: "40px",
-                                }}
-                              >
-                                <div className="flex items-center gap-0.5 truncate text-left">
-                                  {icon && <span className="shrink-0 opacity-90">{icon}</span>}
-                                  <span className="truncate">{event.title}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
+                            })}
+                            {day.allDayEvents.length > 2 && (
+                              <p className="px-1 text-[11px] text-muted-foreground">
+                                +{day.allDayEvents.length - 2}件
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="pt-1 text-[11px] text-muted-foreground/70">
+                            予定なし
+                          </p>
+                        )}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
+
+                  <div className="sticky left-0 z-20 border-r border-border/60 bg-card/95 backdrop-blur">
+                    {WEEK_HOURS.map((hour) => (
+                      <div
+                        key={hour}
+                        className="flex h-16 items-start justify-end border-b border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground"
+                      >
+                        {formatHourLabel(hour)}
+                      </div>
+                    ))}
+                  </div>
+
+                  {weekDays.map((day) => (
+                    <div
+                      key={`${day.key}-timeline`}
+                      className={cn(
+                        "relative border-l border-border/60",
+                        day.isToday && "bg-primary/5"
+                      )}
+                    >
+                      {WEEK_HOURS.map((hour) => {
+                        const quietHour =
+                          hour < WEEK_ACTIVE_HOURS.start || hour >= WEEK_ACTIVE_HOURS.end;
+                        return (
+                          <div
+                            key={`${day.key}-${hour}`}
+                            onDoubleClick={() => handleWeekSlotDoubleClick(day.dateStr, hour * 60)}
+                            className={cn(
+                              "group/hour relative h-16 border-b border-border/50 transition-colors hover:bg-muted/20",
+                              quietHour && (day.isWeekend ? "bg-muted/20" : "bg-muted/10"),
+                              !quietHour && day.isWeekend && "bg-muted/10",
+                              !quietHour && day.isToday && "bg-primary/5",
+                              quietHour && day.isToday && "bg-primary/10"
+                            )}
+                          >
+                            <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-border/35" />
+                          </div>
+                        );
+                      })}
+
+                      {day.isToday && (
+                        <div
+                          className="pointer-events-none absolute inset-x-0 z-20"
+                          style={{ top: `${currentTimeMinutes * WEEK_PIXELS_PER_MINUTE}px` }}
+                        >
+                          <div className="absolute left-0 top-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-400 shadow-[0_0_0_4px_rgba(248,81,73,0.16)]" />
+                          <div className="border-t border-rose-400/90" />
+                          <span className="absolute right-2 -top-4 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-300 backdrop-blur">
+                            {minutesToTimeInput(currentTimeMinutes)}
+                          </span>
+                        </div>
+                      )}
+
+                      {day.timedSegments.map((segment) => {
+                        const pi = priorityMap[segment.event.priority];
+                        const laneWidth = 100 / segment.laneCount;
+                        const top = segment.startMinute * WEEK_PIXELS_PER_MINUTE;
+                        const height = Math.max(
+                          (segment.endMinute - segment.startMinute) * WEEK_PIXELS_PER_MINUTE,
+                          36
+                        );
+                        const compact = height < 64;
+                        const detailTime = `${segment.continuesEarlier ? "00:00" : minutesToTimeLabel(segment.startMinute)}〜${segment.continuesLater ? "24:00" : minutesToTimeLabel(segment.endMinute)}`;
+
+                        return (
+                          <button
+                            key={`${segment.event.id}-${day.key}`}
+                            onClick={() => handleEventClick(segment.event)}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                            className={cn(
+                              "absolute rounded-lg px-2 py-1.5 text-left text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] transition-[transform,opacity] hover:-translate-y-px hover:opacity-95",
+                              segment.event.color,
+                              segment.event.priority === "urgent" && "ring-2 ring-red-300/80",
+                              isEventActiveNow(segment.event, now) && "ring-2 ring-emerald-300/80"
+                            )}
+                            style={{
+                              top: `${top}px`,
+                              height: `${height}px`,
+                              left: `calc(${segment.lane * laneWidth}% + 4px)`,
+                              width: `calc(${laneWidth}% - 8px)`,
+                            }}
+                          >
+                            <div className="flex h-full flex-col gap-1 overflow-hidden">
+                              {!compact && (
+                                <div className="flex items-center gap-1 text-[10px] font-semibold text-white/80">
+                                  {pi && segment.event.priority !== "medium" && (
+                                    <span className="shrink-0">{pi.icon}</span>
+                                  )}
+                                  <span className="truncate">{detailTime}</span>
+                                </div>
+                              )}
+                              <div className="truncate text-xs font-semibold leading-tight">
+                                {segment.event.title}
+                              </div>
+                              {!compact && segment.event.location?.trim() && (
+                                <div className="truncate text-[10px] text-white/80">
+                                  {segment.event.location}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
             </CardContent>
