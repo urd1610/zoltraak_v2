@@ -3,6 +3,7 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { readdir, stat } from "fs/promises";
 import path from "path";
+import { execSync } from "child_process";
 
 const SMB_HOST = "192.168.0.153";
 const SHARES = [
@@ -16,90 +17,307 @@ const SHARES = [
   { name: "スキャナ文書", mountPath: "/Volumes/スキャナ文書" },
 ];
 
+const SCAN_CONCURRENCY = 8;
+
+// ── インメモリ進捗ストア（プロセス内で共有） ──
+interface ScanProgress {
+  scanId: number;
+  status: "running" | "completed" | "failed" | "stopped";
+  startedAt: string;
+  completedAt: string | null;
+  totalShares: number;
+  completedShares: number;
+  currentShare: string;
+  currentPhase: string;
+  message: string;
+  shareResults: string[];
+  totalFiles: number;
+  totalDirectories: number;
+  totalSize: number;
+}
+
+let activeScan: ScanProgress | null = null;
+let cancelRequested = false;
+
 async function mountShare(shareName: string): Promise<boolean> {
-  const { execSync } = require("child_process");
   const mountPath = `/Volumes/${shareName}`;
   try {
-    // Check if already mounted by reading contents
-    const entries = await readdir(mountPath);
-    if (entries.length >= 0) return true;
+    await readdir(mountPath);
+    return true;
   } catch {
-    // Not mounted — try to mount via AppleScript (no root required)
     try {
       const smbUrl = `smb://guest@${SMB_HOST}/${shareName}`;
       execSync(`osascript -e 'mount volume "${smbUrl}"'`, { timeout: 30000 });
-      // Verify mount succeeded
       await stat(mountPath);
       return true;
     } catch {
       return false;
     }
   }
-  return false;
 }
 
-async function scanDirectory(
-  dirPath: string,
+interface FileRecord {
+  share_name: string;
+  file_path: string;
+  file_name: string;
+  extension: string | null;
+  file_size: number;
+  modified_at: Date | null;
+  is_directory: boolean;
+  depth: number;
+  parent_path: string;
+}
+
+async function scanShareFast(
+  rootPath: string,
   shareName: string,
-  depth: number,
-  files: Array<{
-    share_name: string;
-    file_path: string;
-    file_name: string;
-    extension: string | null;
-    file_size: number;
-    modified_at: Date | null;
-    is_directory: boolean;
-    depth: number;
-    parent_path: string;
-  }>,
-  maxDepth: number = 10
-): Promise<void> {
-  if (depth > maxDepth) return;
+  maxDepth: number,
+): Promise<FileRecord[]> {
+  const results: FileRecord[] = [];
+  const queue: [string, number][] = [[rootPath, 0]];
 
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue; // skip hidden files
+  while (queue.length > 0) {
+    if (cancelRequested) break;
+    const [dirPath, depth] = queue.shift()!;
+    if (depth > maxDepth) continue;
 
-      const fullPath = path.join(dirPath, entry.name);
-      const isDir = entry.isDirectory();
+    let entries;
+    try {
+      entries = await readdir(dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
 
-      let fileSize = 0;
-      let modifiedAt: Date | null = null;
-      try {
-        const stats = await stat(fullPath);
-        fileSize = stats.size;
-        modifiedAt = stats.mtime;
-      } catch {
-        // skip inaccessible files
-        continue;
-      }
+    const visible = entries.filter((e) => !e.name.startsWith("."));
 
-      const ext = isDir ? null : path.extname(entry.name).replace(".", "").toLowerCase() || null;
+    for (let i = 0; i < visible.length; i += SCAN_CONCURRENCY) {
+      const chunk = visible.slice(i, i + SCAN_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        chunk.map(async (entry) => {
+          const fullPath = path.join(dirPath, entry.name);
+          const isDir = entry.isDirectory();
+          const s = await stat(fullPath);
+          return { entry, fullPath, isDir, size: s.size, mtime: s.mtime };
+        }),
+      );
 
-      files.push({
-        share_name: shareName,
-        file_path: fullPath,
-        file_name: entry.name,
-        extension: ext,
-        file_size: fileSize,
-        modified_at: modifiedAt,
-        is_directory: isDir,
-        depth,
-        parent_path: dirPath,
-      });
+      for (const r of settled) {
+        if (r.status !== "fulfilled") continue;
+        const { entry, fullPath, isDir, size, mtime } = r.value;
+        const ext = isDir
+          ? null
+          : path.extname(entry.name).replace(".", "").toLowerCase() || null;
 
-      if (isDir) {
-        await scanDirectory(fullPath, shareName, depth + 1, files, maxDepth);
+        results.push({
+          share_name: shareName,
+          file_path: fullPath,
+          file_name: entry.name,
+          extension: ext,
+          file_size: size,
+          modified_at: mtime,
+          is_directory: isDir,
+          depth,
+          parent_path: dirPath,
+        });
+
+        if (isDir) {
+          queue.push([fullPath, depth + 1]);
+        }
       }
     }
-  } catch {
-    // permission denied or inaccessible directory
+  }
+
+  return results;
+}
+
+async function bulkInsert(
+  connection: any,
+  files: FileRecord[],
+  batchSize = 500,
+) {
+  for (let i = 0; i < files.length; i += batchSize) {
+    const batch = files.slice(i, i + batchSize);
+    const placeholders = batch
+      .map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .join(",");
+    const values = batch.flatMap((f) => [
+      f.share_name,
+      f.file_path,
+      f.file_name,
+      f.extension,
+      f.file_size,
+      f.modified_at,
+      f.is_directory ? 1 : 0,
+      f.depth,
+      f.parent_path,
+    ]);
+    await connection.execute(
+      `INSERT INTO server02_files (share_name, file_path, file_name, extension, file_size, modified_at, is_directory, depth, parent_path) VALUES ${placeholders}`,
+      values,
+    );
   }
 }
 
+/**
+ * バックグラウンドでスキャンを実行
+ * ページ遷移しても中断されない
+ */
+async function runScanInBackground(
+  sharesToScan: typeof SHARES,
+  targetShare: string | null,
+  maxDepth: number,
+) {
+  const connection = await pool.getConnection();
+  try {
+    const [logResult] = await connection.execute<any>(
+      "INSERT INTO server02_scan_logs (share_name, status) VALUES (?, 'running')",
+      [targetShare],
+    );
+    const scanId = logResult.insertId;
+
+    activeScan = {
+      scanId,
+      status: "running",
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      totalShares: sharesToScan.length,
+      completedShares: 0,
+      currentShare: "",
+      currentPhase: "mount-all",
+      message: `${sharesToScan.length} 個の共有フォルダを並列マウント中...`,
+      shareResults: [],
+      totalFiles: 0,
+      totalDirectories: 0,
+      totalSize: 0,
+    };
+
+    // Phase 1: 並列マウント
+    const mountResults = await Promise.allSettled(
+      sharesToScan.map(async (share) => {
+        const ok = await mountShare(share.name);
+        return { share, ok };
+      }),
+    );
+
+    const mountedShares: typeof SHARES = [];
+    for (const r of mountResults) {
+      if (r.status === "fulfilled" && r.value.ok) {
+        mountedShares.push(r.value.share);
+      } else {
+        const name =
+          r.status === "fulfilled" ? r.value.share.name : "unknown";
+        activeScan.shareResults.push(`${name} — マウント失敗、スキップ`);
+      }
+    }
+
+    activeScan.totalShares = mountedShares.length;
+    activeScan.currentPhase = "scanning";
+    activeScan.message = `${mountedShares.length} 共有フォルダをマウント完了、スキャン開始`;
+
+    // Phase 2: 各共有を順次スキャン
+    for (let idx = 0; idx < mountedShares.length; idx++) {
+      if (cancelRequested) break;
+
+      const share = mountedShares[idx];
+
+      activeScan.completedShares = idx;
+      activeScan.currentShare = share.name;
+      activeScan.currentPhase = "scanning";
+      activeScan.message = `${share.name} をスキャン中...`;
+
+      await connection.execute(
+        "DELETE FROM server02_files WHERE share_name = ?",
+        [share.name],
+      );
+
+      const files = await scanShareFast(share.mountPath, share.name, maxDepth);
+
+      if (cancelRequested) break;
+
+      activeScan.currentPhase = "indexing";
+      activeScan.message = `${share.name} — ${files.length} 件をDB登録中...`;
+
+      await bulkInsert(connection, files);
+
+      const fileCount = files.filter((f) => !f.is_directory).length;
+      const dirCount = files.filter((f) => f.is_directory).length;
+      const sizeSum = files.reduce((s, f) => s + f.file_size, 0);
+      activeScan.totalFiles += fileCount;
+      activeScan.totalDirectories += dirCount;
+      activeScan.totalSize += sizeSum;
+
+      activeScan.shareResults.push(
+        `${share.name} 完了 — ${fileCount} ファイル, ${dirCount} フォルダ`,
+      );
+    }
+
+    // キャンセルされた場合
+    if (cancelRequested) {
+      await connection.execute(
+        "UPDATE server02_scan_logs SET status = 'failed', error_message = '手動停止', total_files = ?, total_directories = ?, total_size = ?, completed_at = NOW() WHERE id = ?",
+        [activeScan.totalFiles, activeScan.totalDirectories, activeScan.totalSize, scanId],
+      );
+
+      activeScan.status = "stopped";
+      activeScan.completedAt = new Date().toISOString();
+      activeScan.currentPhase = "stopped";
+      activeScan.message = `スキャンを停止しました — ${activeScan.totalFiles} ファイル, ${activeScan.totalDirectories} フォルダ (途中まで)`;
+
+      cancelRequested = false;
+
+      setTimeout(() => {
+        if (activeScan?.scanId === scanId) activeScan = null;
+      }, 10000);
+      return;
+    }
+
+    await connection.execute(
+      "UPDATE server02_scan_logs SET status = 'completed', total_files = ?, total_directories = ?, total_size = ?, completed_at = NOW() WHERE id = ?",
+      [activeScan.totalFiles, activeScan.totalDirectories, activeScan.totalSize, scanId],
+    );
+
+    activeScan.status = "completed";
+    activeScan.completedShares = mountedShares.length;
+    activeScan.completedAt = new Date().toISOString();
+    activeScan.currentPhase = "complete";
+    activeScan.message = `全スキャン完了 — ${activeScan.totalFiles} ファイル, ${activeScan.totalDirectories} フォルダ`;
+
+    // 完了後30秒で進捗データをクリア
+    setTimeout(() => {
+      if (activeScan?.scanId === scanId) {
+        activeScan = null;
+      }
+    }, 30000);
+  } catch (error: any) {
+    if (activeScan) {
+      activeScan.status = "failed";
+      activeScan.currentPhase = "error";
+      activeScan.message =
+        error instanceof Error
+          ? error.message
+          : "スキャン中にエラーが発生しました";
+
+      setTimeout(() => {
+        activeScan = null;
+      }, 30000);
+    }
+  } finally {
+    connection.release();
+  }
+}
+
+// ──────────────────────────────────────────
+// POST — スキャン開始（バックグラウンド実行）
+// ──────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  // 既にスキャン中なら拒否
+  if (activeScan && activeScan.status === "running") {
+    return NextResponse.json(
+      { error: "スキャンが既に実行中です", progress: activeScan },
+      { status: 409 },
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
   const targetShare = body.share || null;
   const maxDepth = body.maxDepth || 10;
@@ -108,165 +326,42 @@ export async function POST(req: NextRequest) {
     ? SHARES.filter((s) => s.name === targetShare)
     : SHARES;
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      function send(data: Record<string, unknown>) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      }
+  // バックグラウンドで実行（awaitしない）
+  runScanInBackground(sharesToScan, targetShare, maxDepth);
 
-      const connection = await pool.getConnection();
-      try {
-        const [logResult] = await connection.execute<any>(
-          "INSERT INTO server02_scan_logs (share_name, status) VALUES (?, 'running')",
-          [targetShare]
-        );
-        const scanId = logResult.insertId;
-
-        let totalFiles = 0;
-        let totalDirs = 0;
-        let totalSize = 0;
-        const totalShares = sharesToScan.length;
-
-        for (let idx = 0; idx < totalShares; idx++) {
-          const share = sharesToScan[idx];
-
-          send({
-            type: "progress",
-            phase: "mounting",
-            shareIndex: idx,
-            totalShares,
-            shareName: share.name,
-            message: `${share.name} をマウント中...`,
-          });
-
-          const mounted = await mountShare(share.name);
-          if (!mounted) {
-            send({
-              type: "progress",
-              phase: "skipped",
-              shareIndex: idx,
-              totalShares,
-              shareName: share.name,
-              message: `${share.name} — マウント失敗、スキップ`,
-            });
-            continue;
-          }
-
-          send({
-            type: "progress",
-            phase: "scanning",
-            shareIndex: idx,
-            totalShares,
-            shareName: share.name,
-            message: `${share.name} をスキャン中...`,
-          });
-
-          await connection.execute("DELETE FROM server02_files WHERE share_name = ?", [share.name]);
-
-          const files: any[] = [];
-          await scanDirectory(share.mountPath, share.name, 0, files, maxDepth);
-
-          send({
-            type: "progress",
-            phase: "indexing",
-            shareIndex: idx,
-            totalShares,
-            shareName: share.name,
-            fileCount: files.length,
-            message: `${share.name} — ${files.length} 件をDB登録中...`,
-          });
-
-          if (files.length > 0) {
-            const batchSize = 500;
-            for (let i = 0; i < files.length; i += batchSize) {
-              const batch = files.slice(i, i + batchSize);
-              const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(",");
-              const values = batch.flatMap((f) => [
-                f.share_name,
-                f.file_path,
-                f.file_name,
-                f.extension,
-                f.file_size,
-                f.modified_at,
-                f.is_directory ? 1 : 0,
-                f.depth,
-                f.parent_path,
-              ]);
-
-              await connection.execute(
-                `INSERT INTO server02_files (share_name, file_path, file_name, extension, file_size, modified_at, is_directory, depth, parent_path) VALUES ${placeholders}`,
-                values
-              );
-            }
-          }
-
-          const fileCount = files.filter((f) => !f.is_directory).length;
-          const dirCount = files.filter((f) => f.is_directory).length;
-          const sizeSum = files.reduce((sum, f) => sum + f.file_size, 0);
-
-          totalFiles += fileCount;
-          totalDirs += dirCount;
-          totalSize += sizeSum;
-
-          send({
-            type: "progress",
-            phase: "done",
-            shareIndex: idx,
-            totalShares,
-            shareName: share.name,
-            fileCount,
-            dirCount,
-            size: sizeSum,
-            message: `${share.name} 完了 — ${fileCount} ファイル, ${dirCount} フォルダ`,
-          });
-        }
-
-        await connection.execute(
-          "UPDATE server02_scan_logs SET status = 'completed', total_files = ?, total_directories = ?, total_size = ?, completed_at = NOW() WHERE id = ?",
-          [totalFiles, totalDirs, totalSize, scanId]
-        );
-
-        send({
-          type: "complete",
-          scanId,
-          totalFiles,
-          totalDirectories: totalDirs,
-          totalSize,
-          message: `全スキャン完了 — ${totalFiles} ファイル, ${totalDirs} フォルダ`,
-        });
-      } catch (error: any) {
-        send({
-          type: "error",
-          message: error instanceof Error ? error.message : "スキャン中にエラーが発生しました",
-        });
-      } finally {
-        connection.release();
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  return NextResponse.json({ status: "started", message: "スキャンを開始しました" });
 }
 
-// GET: return scan status and stats
+// ──────────────────────────────────────────
+// DELETE — スキャン停止
+// ──────────────────────────────────────────
+export async function DELETE() {
+  if (!activeScan || activeScan.status !== "running") {
+    return NextResponse.json({ error: "実行中のスキャンはありません" }, { status: 404 });
+  }
+
+  cancelRequested = true;
+  return NextResponse.json({ status: "stopping", message: "スキャンの停止をリクエストしました" });
+}
+
+// ──────────────────────────────────────────
+// GET — 統計情報 + スキャン進捗
+// ──────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const progressOnly = url.searchParams.get("progress");
+
+    // ?progress=1 のときは進捗だけ返す（軽量ポーリング用）
+    if (progressOnly) {
+      return NextResponse.json({ progress: activeScan });
+    }
+
     const connection = await pool.getConnection();
     try {
-      // Get latest scan info
       const [logs] = await connection.execute<RowDataPacket[]>(
-        "SELECT * FROM server02_scan_logs ORDER BY started_at DESC LIMIT 5"
+        "SELECT * FROM server02_scan_logs ORDER BY started_at DESC LIMIT 5",
       );
-
-      // Get stats per share
       const [stats] = await connection.execute<RowDataPacket[]>(
         `SELECT share_name,
                 COUNT(*) as total_entries,
@@ -275,22 +370,18 @@ export async function GET(req: NextRequest) {
                 SUM(file_size) as total_size,
                 MAX(indexed_at) as last_indexed
          FROM server02_files
-         GROUP BY share_name`
+         GROUP BY share_name`,
       );
-
-      // Get total count
       const [totalRows] = await connection.execute<RowDataPacket[]>(
-        "SELECT COUNT(*) as total FROM server02_files"
+        "SELECT COUNT(*) as total FROM server02_files",
       );
-
-      // Get extension distribution (top 20)
       const [extensions] = await connection.execute<RowDataPacket[]>(
         `SELECT extension, COUNT(*) as count
          FROM server02_files
          WHERE is_directory = 0 AND extension IS NOT NULL
          GROUP BY extension
          ORDER BY count DESC
-         LIMIT 20`
+         LIMIT 20`,
       );
 
       return NextResponse.json({
@@ -298,6 +389,7 @@ export async function GET(req: NextRequest) {
         shareStats: stats,
         totalIndexed: totalRows[0].total,
         topExtensions: extensions,
+        progress: activeScan,
       });
     } finally {
       connection.release();

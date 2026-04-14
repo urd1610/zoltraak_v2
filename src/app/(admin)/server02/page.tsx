@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Search,
   Folder,
@@ -13,6 +13,7 @@ import {
   FileVideo,
   FileJson,
   RefreshCw,
+  Square,
   ChevronRight,
   ChevronDown,
   HardDrive,
@@ -196,6 +197,8 @@ export default function Server02Page() {
   const [scanShareIndex, setScanShareIndex] = useState(0);
   const [scanTotalShares, setScanTotalShares] = useState(0);
   const [scanShareResults, setScanShareResults] = useState<string[]>([]);
+  const [scanStartedAt, setScanStartedAt] = useState<Date | null>(null);
+  const [scanElapsed, setScanElapsed] = useState("");
 
   const [browseRoot, setBrowseRoot] = useState<DirectoryTreeNode[]>([]);
   const [browseShare, setBrowseShare] = useState("");
@@ -257,26 +260,105 @@ export default function Server02Page() {
   const fetchStats = useCallback(async () => {
     try {
       const response = await fetch("/api/server02/scan");
-      const data: StatsData = await response.json();
+      const data = await response.json();
       setStats(data);
 
-      const shareNames = data.shareStats.map((s) => s.share_name);
+      const shareNames = (data.shareStats || []).map((s: any) => s.share_name);
       setShares(shareNames);
 
-      const exts = data.topExtensions.map((e) => e.extension || "no-ext");
+      const exts = (data.topExtensions || []).map((e: any) => e.extension || "no-ext");
       setExtensions(exts);
+
+      // サーバー側で進行中のスキャンがあれば復元
+      if (data.progress && data.progress.status === "running") {
+        applyProgress(data.progress);
+      }
     } catch (error) {
       console.error("Failed to fetch stats:", error);
     }
   }, []);
 
-  const handleScan = async (targetShare?: string) => {
-    setIsScanning(true);
-    setScanProgress("スキャンを開始しています...");
-    setScanShareIndex(0);
-    setScanTotalShares(0);
-    setScanShareResults([]);
+  /** サーバーの進捗オブジェクトをローカルstateに反映 */
+  function applyProgress(p: any) {
+    setIsScanning(p.status === "running");
+    setScanProgress(p.message || "");
+    setScanShareIndex(p.completedShares || 0);
+    setScanTotalShares(p.totalShares || 0);
+    setScanShareResults(p.shareResults || []);
+    setScanStartedAt(p.startedAt ? new Date(p.startedAt) : null);
+  }
 
+  // 経過時間タイマー
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (isScanning && scanStartedAt) {
+      const tick = () => {
+        const sec = Math.floor((Date.now() - scanStartedAt.getTime()) / 1000);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        setScanElapsed(m > 0 ? `${m}分${s}秒` : `${s}秒`);
+      };
+      tick();
+      timerRef.current = setInterval(tick, 1000);
+      return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    }
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, [isScanning, scanStartedAt]);
+
+  // ポーリング: スキャン中は1秒ごとに進捗を取得
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (!isScanning) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/server02/scan?progress=1");
+        const data = await res.json();
+        const p = data.progress;
+
+        if (!p) {
+          // スキャン完了後にサーバー側でクリアされた
+          setIsScanning(false);
+          setScanProgress("");
+          setScanShareResults([]);
+          setScanStartedAt(null);
+          setScanElapsed("");
+          await fetchStats();
+          return;
+        }
+
+        applyProgress(p);
+
+        if (p.status === "completed" || p.status === "stopped") {
+          setIsScanning(false);
+          await fetchStats();
+          setTimeout(() => {
+            setScanProgress("");
+            setScanShareResults([]);
+            setScanStartedAt(null);
+            setScanElapsed("");
+          }, 8000);
+        } else if (p.status === "failed") {
+          setIsScanning(false);
+          setTimeout(() => {
+            setScanProgress("");
+            setScanStartedAt(null);
+            setScanElapsed("");
+          }, 5000);
+        }
+      } catch {
+        // ネットワークエラーは無視して次回ポーリング
+      }
+    };
+
+    pollRef.current = setInterval(poll, 1000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [isScanning, fetchStats]);
+
+  const handleScan = async (targetShare?: string) => {
     try {
       const body = targetShare ? { share: targetShare } : {};
       const response = await fetch("/api/server02/scan", {
@@ -285,55 +367,35 @@ export default function Server02Page() {
         body: JSON.stringify(body),
       });
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      const result = await response.json();
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const dataLine = line.replace(/^data: /, "").trim();
-          if (!dataLine) continue;
-          try {
-            const event = JSON.parse(dataLine);
-
-            if (event.type === "progress") {
-              setScanProgress(event.message);
-              setScanShareIndex(event.shareIndex);
-              setScanTotalShares(event.totalShares);
-              if (event.phase === "done") {
-                setScanShareResults((prev) => [...prev, event.message]);
-              }
-            } else if (event.type === "complete") {
-              setScanProgress(event.message);
-              await fetchStats();
-              setTimeout(() => {
-                setScanProgress("");
-                setScanShareResults([]);
-              }, 5000);
-            } else if (event.type === "error") {
-              setScanProgress(event.message);
-              setTimeout(() => setScanProgress(""), 5000);
-            }
-          } catch {
-            // ignore parse errors
-          }
-        }
+      if (response.status === 409) {
+        // 既にスキャン中 — 進捗を表示するだけ
+        if (result.progress) applyProgress(result.progress);
+        return;
       }
+
+      // スキャン開始成功 — ポーリング開始
+      setIsScanning(true);
+      setScanStartedAt(new Date());
+      setScanProgress("スキャンを開始しています...");
+      setScanShareIndex(0);
+      setScanTotalShares(0);
+      setScanShareResults([]);
+      setScanElapsed("");
     } catch (error) {
       console.error("Scan failed:", error);
-      setScanProgress("スキャンに失敗しました");
+      setScanProgress("スキャンの開始に失敗しました");
       setTimeout(() => setScanProgress(""), 5000);
-    } finally {
-      setIsScanning(false);
+    }
+  };
+
+  const handleStopScan = async () => {
+    try {
+      await fetch("/api/server02/scan", { method: "DELETE" });
+      setScanProgress("スキャンを停止中...");
+    } catch {
+      // 次回ポーリングで状態が反映される
     }
   };
 
@@ -399,34 +461,63 @@ export default function Server02Page() {
             </p>
           </div>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs hover:bg-primary/90 cursor-pointer">
-            <RefreshCw className="h-4 w-4" />
-            {isScanning ? "スキャン中..." : "スキャン"}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>スキャン対象</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleScan()}>
-                すべての共有フォルダ
-              </DropdownMenuItem>
-              {shares.map((share) => (
-                <DropdownMenuItem
-                  key={share}
-                  onClick={() => handleScan(share)}
-                >
-                  {share}
+        <div className="flex items-center gap-2">
+          {isScanning && (
+            <Button
+              variant="outline"
+              onClick={handleStopScan}
+              className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Square className="h-4 w-4 mr-2" />
+              停止
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs hover:bg-primary/90 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              disabled={isScanning}
+            >
+              <RefreshCw className={cn("h-4 w-4", isScanning && "animate-spin")} />
+              {isScanning ? "スキャン中..." : "スキャン"}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>スキャン対象</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleScan()}>
+                  すべての共有フォルダ
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                {shares.map((share) => (
+                  <DropdownMenuItem
+                    key={share}
+                    onClick={() => handleScan(share)}
+                  >
+                    {share}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* Scan Progress / Status */}
       {(isScanning || scanProgress) && (
         <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 px-4 py-4 space-y-3">
+          {/* Time info */}
+          {scanStartedAt && (
+            <div className="flex items-center justify-between text-xs text-blue-300/80">
+              <span>
+                開始: {scanStartedAt.toLocaleTimeString("ja-JP")}
+              </span>
+              {scanElapsed && (
+                <span className="font-mono tabular-nums">
+                  経過: {scanElapsed}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Progress bar */}
           {isScanning && scanTotalShares > 0 && (
             <div className="space-y-1.5">
