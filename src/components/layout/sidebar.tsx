@@ -25,6 +25,7 @@ import {
   Briefcase,
   Image,
   FileText,
+  HardDrive,
   PanelLeftClose,
   PanelLeft,
   Settings,
@@ -52,6 +53,7 @@ const navItems: NavItem[] = [
   { label: "ジョブズ", href: "/jobs", icon: Briefcase },
   { label: "OGP画像", href: "/ogp", icon: Image },
   { label: "要件定義", href: "/requirements", icon: FileText },
+  { label: "Server02", href: "/server02", icon: HardDrive },
 ];
 
 export function Sidebar() {

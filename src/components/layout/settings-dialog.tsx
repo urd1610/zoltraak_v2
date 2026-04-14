@@ -30,6 +30,7 @@ const allNavItems = [
   { label: "ジョブズ", href: "/jobs" },
   { label: "OGP画像", href: "/ogp" },
   { label: "要件定義", href: "/requirements" },
+  { label: "Server02", href: "/server02" },
 ];
 
 function Toggle({
