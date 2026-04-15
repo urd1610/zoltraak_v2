@@ -39,9 +39,6 @@ export async function GET(req: NextRequest) {
 
     const connection = await pool.getConnection();
     try {
-      // Set MySQL query timeout to 15 seconds to prevent slow LIKE queries from hanging
-      await connection.execute("SET SESSION max_execution_time = 15000");
-
       const [countRows] = await connection.execute<RowDataPacket[]>(
         `SELECT COUNT(*) as total FROM server02_files ${where}`,
         params
