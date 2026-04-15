@@ -19,8 +19,9 @@ export async function GET(req: NextRequest) {
     if (query) {
       const keywords = query.split(/\s+/).filter(Boolean);
       for (const kw of keywords) {
-        where += " AND (file_name LIKE ? OR file_path LIKE ?)";
-        params.push(`%${kw}%`, `%${kw}%`);
+        // file_path includes file_name, so searching file_path alone covers both
+        where += " AND file_path LIKE ?";
+        params.push(`%${kw}%`);
       }
     }
     if (share) {
@@ -39,21 +40,22 @@ export async function GET(req: NextRequest) {
 
     const connection = await pool.getConnection();
     try {
-      const [countRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) as total FROM server02_files ${where}`,
-        params
-      );
-      const total = countRows[0].total;
-
+      // Fetch limit+1 rows to detect if more results exist, avoiding a slow COUNT(*) query
+      const fetchLimit = limit + 1;
       const [rows] = await connection.execute<RowDataPacket[]>(
         `SELECT id, share_name, file_path, file_name, extension, file_size, modified_at, is_directory, depth
          FROM server02_files ${where}
          ORDER BY is_directory DESC, modified_at DESC
          LIMIT ? OFFSET ?`,
-        [...params, limit, offset]
+        [...params, fetchLimit, offset]
       );
 
-      return NextResponse.json({ files: rows, total, page, limit });
+      const hasMore = rows.length > limit;
+      const files = hasMore ? rows.slice(0, limit) : rows;
+      // Provide an approximate total: exact count is too expensive for LIKE queries
+      const total = hasMore ? offset + limit + 1 : offset + files.length;
+
+      return NextResponse.json({ files, total, page, limit, hasMore });
     } finally {
       connection.release();
     }
