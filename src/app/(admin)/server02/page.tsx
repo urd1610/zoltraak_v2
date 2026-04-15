@@ -467,16 +467,27 @@ export default function Server02Page() {
   // Debounced AI working state — prevents flicker from cross-store timing gaps
   const [isAiWorking, setIsAiWorking] = useState(false);
   const aiWorkingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const aiSafetyTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (isExecutingActions) {
       // Immediately show animation
       if (aiWorkingTimerRef.current) { clearTimeout(aiWorkingTimerRef.current); aiWorkingTimerRef.current = null; }
       setIsAiWorking(true);
+      // Safety timeout: force-stop animation after 60s to prevent infinite "searching"
+      if (aiSafetyTimerRef.current) clearTimeout(aiSafetyTimerRef.current);
+      aiSafetyTimerRef.current = setTimeout(() => {
+        console.warn("[Server02] Safety timeout: forcing isAiWorking=false after 60s");
+        setIsAiWorking(false);
+      }, 60_000);
     } else {
       // Delay hiding to bridge micro-gaps between store updates
       aiWorkingTimerRef.current = setTimeout(() => setIsAiWorking(false), 400);
+      if (aiSafetyTimerRef.current) { clearTimeout(aiSafetyTimerRef.current); aiSafetyTimerRef.current = null; }
     }
-    return () => { if (aiWorkingTimerRef.current) clearTimeout(aiWorkingTimerRef.current); };
+    return () => {
+      if (aiWorkingTimerRef.current) clearTimeout(aiWorkingTimerRef.current);
+      if (aiSafetyTimerRef.current) clearTimeout(aiSafetyTimerRef.current);
+    };
   }, [isExecutingActions]);
 
   const fetchStats = useCallback(async () => {

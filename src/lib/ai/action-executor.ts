@@ -211,7 +211,9 @@ export async function executeAction(call: ActionCall): Promise<ActionResult> {
         if (call.params.type) qs.set("type", String(call.params.type));
         qs.set("limit", String(call.params.limit || 20));
 
-        const res = await fetch(`/api/server02/search?${qs}`);
+        const res = await fetch(`/api/server02/search?${qs}`, {
+          signal: AbortSignal.timeout(30_000),
+        });
         if (!res.ok) throw new Error("検索に失敗しました");
         const data = await res.json();
         return { action: call.action, success: true, message: `${data.total}件のファイルが見つかりました`, data };
@@ -225,7 +227,9 @@ export async function executeAction(call: ActionCall): Promise<ActionResult> {
         qs.set("share", String(call.params.share));
         if (call.params.path) qs.set("path", String(call.params.path));
 
-        const res = await fetch(`/api/server02/browse?${qs}`);
+        const res = await fetch(`/api/server02/browse?${qs}`, {
+          signal: AbortSignal.timeout(30_000),
+        });
         if (!res.ok) throw new Error("フォルダの参照に失敗しました");
         const data = await res.json();
         const count = data.files?.length || 0;
@@ -239,7 +243,9 @@ export async function executeAction(call: ActionCall): Promise<ActionResult> {
         const qs = new URLSearchParams();
         qs.set("path", String(call.params.file_path));
 
-        const res = await fetch(`/api/server02/read?${qs}`);
+        const res = await fetch(`/api/server02/read?${qs}`, {
+          signal: AbortSignal.timeout(60_000),
+        });
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
           throw new Error(e.error || "ファイルの読み取りに失敗しました");
@@ -252,10 +258,13 @@ export async function executeAction(call: ActionCall): Promise<ActionResult> {
         return { action: call.action, success: false, message: `不明なアクション: ${call.action}` };
     }
   } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === "TimeoutError";
     return {
       action: call.action,
       success: false,
-      message: err instanceof Error ? err.message : "不明なエラー",
+      message: isTimeout
+        ? "リクエストがタイムアウトしました。サーバーの応答が遅い可能性があります。"
+        : err instanceof Error ? err.message : "不明なエラー",
     };
   }
 }
