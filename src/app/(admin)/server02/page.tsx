@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, memo } from "react";
 import {
-  Search,
+  HardDrive,
+  RefreshCw,
+  Square,
+  Copy,
+  ExternalLink,
+  FolderOpen,
   Folder,
   File,
   FileText,
@@ -12,16 +17,11 @@ import {
   FileAudio,
   FileVideo,
   FileJson,
-  RefreshCw,
-  Square,
-  ChevronRight,
-  ChevronDown,
-  HardDrive,
+  Check,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,12 +29,12 @@ import {
   DropdownMenuTrigger,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/stores/settings-store";
+import { usePageContextStore, type PageAction } from "@/stores/page-context-store";
 
 interface FileEntry {
   id: number;
@@ -46,13 +46,6 @@ interface FileEntry {
   modified_at: string;
   is_directory: boolean;
   depth: number;
-}
-
-interface SearchResponse {
-  files: FileEntry[];
-  total: number;
-  page: number;
-  limit: number;
 }
 
 interface StatsData {
@@ -81,15 +74,8 @@ interface StatsData {
   }>;
 }
 
-interface DirectoryTreeNode {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  children?: DirectoryTreeNode[];
-  isExpanded?: boolean;
-}
+// ── Helpers ──
 
-// Helper: Format bytes to human-readable size
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -98,7 +84,6 @@ function formatFileSize(bytes: number): string {
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
 }
 
-// Helper: Format date to Japanese format
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   try {
@@ -114,166 +99,268 @@ function formatDate(dateStr: string | null): string {
   }
 }
 
-// Helper: Get appropriate icon for file type
 function getFileIcon(extension: string | null, isDirectory: boolean) {
-  if (isDirectory) {
-    return <Folder className="h-4 w-4 text-blue-400" />;
-  }
-
+  if (isDirectory) return <Folder className="h-4 w-4 text-blue-400" />;
   const ext = extension?.toLowerCase();
   switch (ext) {
-    case "pdf":
-      return <FileText className="h-4 w-4 text-red-400" />;
-    case "doc":
-    case "docx":
-      return <FileText className="h-4 w-4 text-blue-500" />;
-    case "xls":
-    case "xlsx":
-      return <FileText className="h-4 w-4 text-green-500" />;
-    case "ppt":
-    case "pptx":
-      return <FileText className="h-4 w-4 text-orange-500" />;
-    case "js":
-    case "ts":
-    case "tsx":
-    case "jsx":
-    case "py":
-    case "java":
-    case "cpp":
-    case "c":
-    case "cs":
+    case "pdf": return <FileText className="h-4 w-4 text-red-400" />;
+    case "doc": case "docx": return <FileText className="h-4 w-4 text-blue-500" />;
+    case "xls": case "xlsx": return <FileText className="h-4 w-4 text-green-500" />;
+    case "ppt": case "pptx": return <FileText className="h-4 w-4 text-orange-500" />;
+    case "js": case "ts": case "tsx": case "jsx": case "py": case "java": case "cpp": case "c": case "cs":
       return <FileCode className="h-4 w-4 text-yellow-400" />;
-    case "json":
-    case "xml":
-    case "yaml":
-    case "yml":
+    case "json": case "xml": case "yaml": case "yml":
       return <FileJson className="h-4 w-4 text-purple-400" />;
-    case "jpg":
-    case "jpeg":
-    case "png":
-    case "gif":
-    case "webp":
-    case "svg":
+    case "jpg": case "jpeg": case "png": case "gif": case "webp": case "svg":
       return <FileImage className="h-4 w-4 text-pink-400" />;
-    case "zip":
-    case "rar":
-    case "7z":
-    case "tar":
-    case "gz":
+    case "zip": case "rar": case "7z": case "tar": case "gz":
       return <FileArchive className="h-4 w-4 text-yellow-600" />;
-    case "mp3":
-    case "wav":
-    case "flac":
-    case "aac":
+    case "mp3": case "wav": case "flac": case "aac":
       return <FileAudio className="h-4 w-4 text-purple-500" />;
-    case "mp4":
-    case "avi":
-    case "mkv":
-    case "mov":
+    case "mp4": case "avi": case "mkv": case "mov":
       return <FileVideo className="h-4 w-4 text-cyan-400" />;
-    default:
-      return <File className="h-4 w-4 text-gray-400" />;
+    default: return <File className="h-4 w-4 text-gray-400" />;
   }
 }
+
+// ── Sub-components ──
+
+/** Searching animation overlay shown when AI is working */
+const SearchingOverlay = memo(function SearchingOverlay() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 gap-4">
+      <div className="relative">
+        <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+        <Search className="absolute inset-0 m-auto h-6 w-6 text-primary" />
+      </div>
+      <div className="text-center space-y-1">
+        <p className="text-sm font-medium text-foreground">AIアシスタントが検索しています...</p>
+        <p className="text-xs text-muted-foreground">右のチャットパネルで進捗を確認できます</p>
+      </div>
+    </div>
+  );
+});
+
+/** Clipboard copy button with feedback */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+      title="パスをコピー"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+/** Open file via server API */
+async function openFile(path: string) {
+  try {
+    await fetch("/api/server02/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, type: "file" }),
+    });
+  } catch {
+    // silent
+  }
+}
+
+/** Open containing directory via server API */
+async function openDirectory(path: string) {
+  try {
+    await fetch("/api/server02/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, type: "directory" }),
+    });
+  } catch {
+    // silent
+  }
+}
+
+/** File result row with actions */
+const FileResultRow = memo(function FileResultRow({ file }: { file: FileEntry }) {
+  return (
+    <tr className="border-b border-border/50 hover:bg-muted/50 transition-colors group">
+      <td className="py-3 px-4">
+        <div className="flex items-center gap-2">
+          {getFileIcon(file.extension, file.is_directory)}
+          <span className="font-medium truncate">{file.file_name}</span>
+        </div>
+      </td>
+      <td className="py-3 px-4">
+        <div className="flex items-center gap-1 max-w-xs">
+          <span className="text-xs text-muted-foreground truncate" title={file.file_path}>
+            {file.file_path}
+          </span>
+          <CopyButton text={file.file_path} />
+        </div>
+      </td>
+      <td className="py-3 px-4">
+        <Badge variant="secondary" className="text-xs">{file.share_name}</Badge>
+      </td>
+      <td className="py-3 px-4 text-right text-muted-foreground">
+        {file.is_directory ? "—" : formatFileSize(file.file_size)}
+      </td>
+      <td className="py-3 px-4 text-xs text-muted-foreground">
+        {formatDate(file.modified_at)}
+      </td>
+      <td className="py-2 px-4">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!file.is_directory && (
+            <button
+              onClick={() => openFile(file.file_path)}
+              className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+              title="ファイルを開く"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={() => openDirectory(file.file_path)}
+            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            title="フォルダを開く"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
+/** Scan progress section */
+const ScanProgressSection = memo(function ScanProgressSection({
+  isScanning,
+  scanProgress,
+  scanStartedAt,
+  scanElapsed,
+  scanShareIndex,
+  scanTotalShares,
+  scanShareResults,
+}: {
+  isScanning: boolean;
+  scanProgress: string;
+  scanStartedAt: Date | null;
+  scanElapsed: string;
+  scanShareIndex: number;
+  scanTotalShares: number;
+  scanShareResults: string[];
+}) {
+  if (!isScanning && !scanProgress) return null;
+
+  return (
+    <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 px-4 py-4 space-y-3">
+      {scanStartedAt && (
+        <div className="flex items-center justify-between text-xs text-blue-300/80">
+          <span>開始: {scanStartedAt.toLocaleTimeString("ja-JP")}</span>
+          {scanElapsed && <span className="font-mono tabular-nums">経過: {scanElapsed}</span>}
+        </div>
+      )}
+      {isScanning && scanTotalShares > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-blue-300">
+            <span>{scanShareIndex + 1} / {scanTotalShares} 共有フォルダ</span>
+            <span>{Math.round(((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100)}%</span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-blue-500/20 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all duration-500 ease-out"
+              style={{ width: `${((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+      <div className="text-sm text-blue-300">{scanProgress}</div>
+      {scanShareResults.length > 0 && (
+        <div className="space-y-1 text-xs text-blue-300/70 border-t border-blue-500/20 pt-2 max-h-32 overflow-y-auto">
+          {scanShareResults.map((result, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <span className="text-green-400">✓</span>
+              {result}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ── Main Page ──
 
 export default function Server02Page() {
   const { isLoggedIn, isAdmin, getAuthHeaders } = useSettingsStore();
   const canManageScan = isLoggedIn && isAdmin();
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedShare, setSelectedShare] = useState("");
-  const [selectedExtension, setSelectedExtension] = useState("");
-  const [selectedType, setSelectedType] = useState<"" | "file" | "directory">("");
-  const [viewMode, setViewMode] = useState<"search" | "browse">("search");
-  const [listView, setListView] = useState<"table" | "grid">("table");
-
-  const [searchResults, setSearchResults] = useState<FileEntry[]>([]);
-  const [totalResults, setTotalResults] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(50);
-  const [isSearching, setIsSearching] = useState(false);
-
   const [stats, setStats] = useState<StatsData | null>(null);
   const [shares, setShares] = useState<string[]>([]);
-  const [extensions, setExtensions] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState<string>("");
+  const [scanProgress, setScanProgress] = useState("");
   const [scanShareIndex, setScanShareIndex] = useState(0);
   const [scanTotalShares, setScanTotalShares] = useState(0);
   const [scanShareResults, setScanShareResults] = useState<string[]>([]);
   const [scanStartedAt, setScanStartedAt] = useState<Date | null>(null);
   const [scanElapsed, setScanElapsed] = useState("");
 
-  const [browseRoot, setBrowseRoot] = useState<DirectoryTreeNode[]>([]);
-  const [browseShare, setBrowseShare] = useState("");
-  const [browsePath, setBrowsePath] = useState("");
-  const [breadcrumbs, setBreadcrumbs] = useState<Array<{ name: string; path: string }>>([]);
+  // AI action results → displayed as search results
+  const { actionResults, isExecutingActions } = usePageContextStore();
 
-  // Debounce search
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  // Extract search results from the latest server02_search action result
+  const searchResults: FileEntry[] = (() => {
+    const searchAction = [...actionResults].reverse().find((r) => r.action === "server02_search" && r.success);
+    if (!searchAction?.data) return [];
+    const data = searchAction.data as { files?: FileEntry[] };
+    return data.files || [];
+  })();
 
-  const performSearch = useCallback(async (query: string, page: number) => {
-    setIsSearching(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("q", query);
-      params.set("page", page.toString());
-      params.set("limit", pageSize.toString());
-      if (selectedShare) params.set("share", selectedShare);
-      if (selectedExtension) params.set("ext", selectedExtension);
-      if (selectedType) params.set("type", selectedType);
+  const searchTotal = (() => {
+    const searchAction = [...actionResults].reverse().find((r) => r.action === "server02_search" && r.success);
+    if (!searchAction?.data) return 0;
+    const data = searchAction.data as { total?: number };
+    return data.total || 0;
+  })();
 
-      const response = await fetch(`/api/server02/search?${params}`);
-      const data: SearchResponse = await response.json();
-      setSearchResults(data.files || []);
-      setTotalResults(data.total || 0);
-      setCurrentPage(page);
-    } catch (error) {
-      console.error("Search failed:", error);
-      setSearchResults([]);
-      setTotalResults(0);
-    } finally {
-      setIsSearching(false);
+  const searchMessage = (() => {
+    const searchAction = [...actionResults].reverse().find((r) => r.action === "server02_search" && r.success);
+    return searchAction?.message || "";
+  })();
+
+  // Debounced AI working state — prevents flicker from cross-store timing gaps
+  const [isAiWorking, setIsAiWorking] = useState(false);
+  const aiWorkingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (isExecutingActions) {
+      // Immediately show animation
+      if (aiWorkingTimerRef.current) { clearTimeout(aiWorkingTimerRef.current); aiWorkingTimerRef.current = null; }
+      setIsAiWorking(true);
+    } else {
+      // Delay hiding to bridge micro-gaps between store updates
+      aiWorkingTimerRef.current = setTimeout(() => setIsAiWorking(false), 400);
     }
-  }, [selectedShare, selectedExtension, selectedType, pageSize]);
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    setCurrentPage(1);
-
-    if (searchTimeout) clearTimeout(searchTimeout);
-    const timeout = setTimeout(() => {
-      if (query.trim()) {
-        performSearch(query, 1);
-      } else {
-        setSearchResults([]);
-        setTotalResults(0);
-      }
-    }, 300);
-    setSearchTimeout(timeout);
-  };
-
-  const handleFilterChange = () => {
-    setCurrentPage(1);
-    if (searchQuery.trim()) {
-      performSearch(searchQuery, 1);
-    }
-  };
+    return () => { if (aiWorkingTimerRef.current) clearTimeout(aiWorkingTimerRef.current); };
+  }, [isExecutingActions]);
 
   const fetchStats = useCallback(async () => {
     try {
       const response = await fetch("/api/server02/scan");
       const data = await response.json();
       setStats(data);
-
-      const shareNames = (data.shareStats || []).map((s: any) => s.share_name);
+      const shareNames = (data.shareStats || []).map((s: { share_name: string }) => s.share_name);
       setShares(shareNames);
-
-      const exts = (data.topExtensions || []).map((e: any) => e.extension || "no-ext");
-      setExtensions(exts);
-
-      // サーバー側で進行中のスキャンがあれば復元
       if (data.progress && data.progress.status === "running") {
         applyProgress(data.progress);
       }
@@ -282,17 +369,16 @@ export default function Server02Page() {
     }
   }, []);
 
-  /** サーバーの進捗オブジェクトをローカルstateに反映 */
-  function applyProgress(p: any) {
+  function applyProgress(p: Record<string, unknown>) {
     setIsScanning(p.status === "running");
-    setScanProgress(p.message || "");
-    setScanShareIndex(p.completedShares || 0);
-    setScanTotalShares(p.totalShares || 0);
-    setScanShareResults(p.shareResults || []);
-    setScanStartedAt(p.startedAt ? new Date(p.startedAt) : null);
+    setScanProgress((p.message as string) || "");
+    setScanShareIndex((p.completedShares as number) || 0);
+    setScanTotalShares((p.totalShares as number) || 0);
+    setScanShareResults((p.shareResults as string[]) || []);
+    setScanStartedAt(p.startedAt ? new Date(p.startedAt as string) : null);
   }
 
-  // 経過時間タイマー
+  // Elapsed timer
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (isScanning && scanStartedAt) {
@@ -309,7 +395,7 @@ export default function Server02Page() {
     if (timerRef.current) clearInterval(timerRef.current);
   }, [isScanning, scanStartedAt]);
 
-  // ポーリング: スキャン中は1秒ごとに進捗を取得
+  // Polling during scan
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (!isScanning) {
@@ -324,7 +410,6 @@ export default function Server02Page() {
         const p = data.progress;
 
         if (!p) {
-          // スキャン完了後にサーバー側でクリアされた
           setIsScanning(false);
           setScanProgress("");
           setScanShareResults([]);
@@ -354,7 +439,7 @@ export default function Server02Page() {
           }, 5000);
         }
       } catch {
-        // ネットワークエラーは無視して次回ポーリング
+        // ignore
       }
     };
 
@@ -369,22 +454,14 @@ export default function Server02Page() {
       const body = targetShare ? { share: targetShare } : {};
       const response = await fetch("/api/server02/scan", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers,
-        },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
       });
-
       const result = await response.json();
-
       if (response.status === 409) {
-        // 既にスキャン中 — 進捗を表示するだけ
         if (result.progress) applyProgress(result.progress);
         return;
       }
-
-      // スキャン開始成功 — ポーリング開始
       setIsScanning(true);
       setScanStartedAt(new Date());
       setScanProgress("スキャンを開始しています...");
@@ -402,64 +479,70 @@ export default function Server02Page() {
   const handleStopScan = async () => {
     if (!canManageScan) return;
     try {
-      await fetch("/api/server02/scan", {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
+      await fetch("/api/server02/scan", { method: "DELETE", headers: getAuthHeaders() });
       setScanProgress("スキャンを停止中...");
     } catch {
-      // 次回ポーリングで状態が反映される
+      // next poll picks it up
     }
   };
 
-  const handleBrowse = async (share: string) => {
-    setBrowseShare(share);
-    setViewMode("browse");
-    setBrowsePath(share);
-    setBreadcrumbs([{ name: share, path: share }]);
+  // ── AI Assistant: ページコンテキスト登録 ──
+  const { setPageContext, clearPageContext, refreshTrigger } = usePageContextStore();
 
-    try {
-      const params = new URLSearchParams();
-      params.set("share", share);
+  useEffect(() => {
+    const server02Actions: PageAction[] = [
+      {
+        name: "server02_search",
+        description: "共有フォルダ内のファイルをキーワードで検索します",
+        parameters: {
+          q: { type: "string", description: "検索キーワード", required: true },
+          share: { type: "string", description: "共有フォルダ名で絞り込み" },
+          ext: { type: "string", description: "拡張子で絞り込み（例: pdf, xlsx）" },
+          type: { type: "string", description: "種類で絞り込み", enum: ["file", "directory"] },
+          limit: { type: "number", description: "最大取得件数（デフォルト20）" },
+        },
+      },
+      {
+        name: "server02_browse",
+        description: "共有フォルダのディレクトリ構造を参照します",
+        parameters: {
+          share: { type: "string", description: "共有フォルダ名", required: true },
+          path: { type: "string", description: "参照するパス（省略でルート）" },
+        },
+      },
+      {
+        name: "server02_read_file",
+        description: "テキストファイルの内容を読み取ります（512KB以下のテキストファイルのみ）",
+        parameters: {
+          file_path: { type: "string", description: "ファイルのフルパス（/Volumes/共有名/...）", required: true },
+        },
+      },
+    ];
 
-      const response = await fetch(`/api/server02/browse?${params}`);
-      const data = await response.json();
+    setPageContext("server02", "Server02 ファイル検索", {
+      totalIndexed: stats?.totalIndexed || 0,
+      shareCount: shares.length,
+      shares,
+      topExtensions: stats?.topExtensions?.slice(0, 5) || [],
+    }, server02Actions);
+  }, [stats, shares, setPageContext]);
 
-      if (data.files && Array.isArray(data.files)) {
-        const nodes: DirectoryTreeNode[] = data.files.map((f: FileEntry) => ({
-          name: f.file_name,
-          path: f.file_path,
-          isDirectory: f.is_directory,
-          children: f.is_directory ? [] : undefined,
-          isExpanded: false,
-        }));
-        setBrowseRoot(nodes);
-      }
-    } catch (error) {
-      console.error("Browse failed:", error);
+  // ページ離脱時のみコンテキストをクリア（依存値変更時はクリアしない）
+  useEffect(() => {
+    return () => clearPageContext();
+  }, [clearPageContext]);
+
+  // ── AI Assistant: リフレッシュトリガー ──
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      fetchStats();
     }
-  };
+  }, [refreshTrigger, fetchStats]);
 
   // Initial load
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
-
-  const maxPages = Math.ceil(totalResults / pageSize);
-  const hasNextPage = currentPage < maxPages;
-  const hasPreviousPage = currentPage > 1;
-
-  const handlePreviousPage = () => {
-    if (hasPreviousPage) {
-      performSearch(searchQuery, currentPage - 1);
-    }
-  };
-
-  const handleNextPage = () => {
-    if (hasNextPage) {
-      performSearch(searchQuery, currentPage + 1);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -470,7 +553,7 @@ export default function Server02Page() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Server02 ファイル検索</h1>
             <p className="text-sm text-muted-foreground">
-              共有フォルダのファイルを検索・ブラウズします
+              AIアシスタントに話しかけてファイルを検索できます
             </p>
           </div>
         </div>
@@ -503,10 +586,7 @@ export default function Server02Page() {
                       すべての共有フォルダ
                     </DropdownMenuItem>
                     {shares.map((share) => (
-                      <DropdownMenuItem
-                        key={share}
-                        onClick={() => handleScan(share)}
-                      >
+                      <DropdownMenuItem key={share} onClick={() => handleScan(share)}>
                         {share}
                       </DropdownMenuItem>
                     ))}
@@ -518,491 +598,118 @@ export default function Server02Page() {
         </div>
       </div>
 
-      {/* Scan Progress / Status */}
-      {(isScanning || scanProgress) && (
-        <div className="rounded-lg bg-blue-500/10 border border-blue-500/30 px-4 py-4 space-y-3">
-          {/* Time info */}
-          {scanStartedAt && (
-            <div className="flex items-center justify-between text-xs text-blue-300/80">
-              <span>
-                開始: {scanStartedAt.toLocaleTimeString("ja-JP")}
-              </span>
-              {scanElapsed && (
-                <span className="font-mono tabular-nums">
-                  経過: {scanElapsed}
-                </span>
-              )}
+      {/* Scan Progress */}
+      <ScanProgressSection
+        isScanning={isScanning}
+        scanProgress={scanProgress}
+        scanStartedAt={scanStartedAt}
+        scanElapsed={scanElapsed}
+        scanShareIndex={scanShareIndex}
+        scanTotalShares={scanTotalShares}
+        scanShareResults={scanShareResults}
+      />
+
+      {/* Main Content: AI search results or welcome state */}
+      {isAiWorking ? (
+        <Card>
+          <CardContent className="pt-6">
+            <SearchingOverlay />
+          </CardContent>
+        </Card>
+      ) : searchResults.length > 0 ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Search className="h-5 w-5 text-primary" />
+                検索結果
+              </CardTitle>
+              <span className="text-sm text-muted-foreground">{searchMessage}</span>
             </div>
-          )}
-
-          {/* Progress bar */}
-          {isScanning && scanTotalShares > 0 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-blue-300">
-                <span>
-                  {scanShareIndex + 1} / {scanTotalShares} 共有フォルダ
-                </span>
-                <span>
-                  {Math.round(((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100)}%
-                </span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-blue-500/20 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-blue-500 transition-all duration-500 ease-out"
-                  style={{
-                    width: `${((scanShareIndex + (scanProgress.includes("完了") ? 1 : 0.5)) / scanTotalShares) * 100}%`,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Current status message */}
-          <div className="text-sm text-blue-300">{scanProgress}</div>
-
-          {/* Completed shares log */}
-          {scanShareResults.length > 0 && (
-            <div className="space-y-1 text-xs text-blue-300/70 border-t border-blue-500/20 pt-2 max-h-32 overflow-y-auto">
-              {scanShareResults.map((result, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <span className="text-green-400">✓</span>
-                  {result}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Search Bar */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            {/* Main Search Input */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="ファイル名またはパスで検索..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                className="pl-10"
-              />
-            </div>
-
-            {/* Filters */}
-            <div className="flex gap-2 flex-wrap">
-              {/* Share Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground">
-                  共有フォルダ
-                  {selectedShare && <Badge className="ml-1">{selectedShare}</Badge>}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-48">
-                  <DropdownMenuCheckboxItem
-                    checked={!selectedShare}
-                    onCheckedChange={() => {
-                      setSelectedShare("");
-                      handleFilterChange();
-                    }}
-                  >
-                    すべて
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuSeparator />
-                  {shares.map((share) => (
-                    <DropdownMenuCheckboxItem
-                      key={share}
-                      checked={selectedShare === share}
-                      onCheckedChange={() => {
-                        setSelectedShare(share);
-                        handleFilterChange();
-                      }}
-                    >
-                      {share}
-                    </DropdownMenuCheckboxItem>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">ファイル名</th>
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">パス</th>
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">共有フォルダ</th>
+                    <th className="text-right py-3 px-4 font-semibold text-foreground">サイズ</th>
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">更新日時</th>
+                    <th className="py-3 px-4 w-20"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {searchResults.map((file) => (
+                    <FileResultRow key={file.id} file={file} />
                   ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Extension Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground">
-                  拡張子
-                  {selectedExtension && <Badge className="ml-1">{selectedExtension}</Badge>}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-48 max-h-60 overflow-y-auto">
-                  <DropdownMenuCheckboxItem
-                    checked={!selectedExtension}
-                    onCheckedChange={() => {
-                      setSelectedExtension("");
-                      handleFilterChange();
-                    }}
-                  >
-                    すべて
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuSeparator />
-                  {extensions.map((ext) => (
-                    <DropdownMenuCheckboxItem
-                      key={ext}
-                      checked={selectedExtension === ext}
-                      onCheckedChange={() => {
-                        setSelectedExtension(ext);
-                        handleFilterChange();
-                      }}
-                    >
-                      .{ext}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Type Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground">
-                  種類
-                  {selectedType && <Badge className="ml-1">{selectedType === "file" ? "ファイル" : "フォルダ"}</Badge>}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-40">
-                  <DropdownMenuCheckboxItem
-                    checked={!selectedType}
-                    onCheckedChange={() => {
-                      setSelectedType("");
-                      handleFilterChange();
-                    }}
-                  >
-                    すべて
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuCheckboxItem
-                    checked={selectedType === "file"}
-                    onCheckedChange={() => {
-                      setSelectedType("file");
-                      handleFilterChange();
-                    }}
-                  >
-                    ファイル
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem
-                    checked={selectedType === "directory"}
-                    onCheckedChange={() => {
-                      setSelectedType("directory");
-                      handleFilterChange();
-                    }}
-                  >
-                    フォルダ
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Clear Filters */}
-              {(selectedShare || selectedExtension || selectedType) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedShare("");
-                    setSelectedExtension("");
-                    setSelectedType("");
-                    setCurrentPage(1);
-                  }}
-                >
-                  フィルターをクリア
-                </Button>
-              )}
+                </tbody>
+              </table>
             </div>
-
-            {/* Results Count */}
-            <div className="text-sm text-muted-foreground">
-              {isSearching
-                ? "検索中..."
-                : totalResults > 0
-                  ? `${totalResults.toLocaleString()} 件見つかりました (${currentPage}/${maxPages} ページ)`
-                  : searchQuery
-                    ? "検索結果がありません"
-                    : "検索キーワードを入力してください"}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Results Tabs */}
-      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "search" | "browse")}>
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="search">検索</TabsTrigger>
-          <TabsTrigger value="browse">ブラウズ</TabsTrigger>
-        </TabsList>
-
-        {/* Search Results Tab */}
-        <TabsContent value="search">
-          {searchResults.length > 0 ? (
-            <div className="space-y-4">
-              {/* Results Table */}
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left py-3 px-4 font-semibold text-foreground">
-                            ファイル名
-                          </th>
-                          <th className="text-left py-3 px-4 font-semibold text-foreground">
-                            パス
-                          </th>
-                          <th className="text-left py-3 px-4 font-semibold text-foreground">
-                            共有フォルダ
-                          </th>
-                          <th className="text-right py-3 px-4 font-semibold text-foreground">
-                            サイズ
-                          </th>
-                          <th className="text-left py-3 px-4 font-semibold text-foreground">
-                            更新日時
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {searchResults.map((file) => (
-                          <tr
-                            key={file.id}
-                            className="border-b border-border/50 hover:bg-muted/50 transition-colors"
-                          >
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-2">
-                                {getFileIcon(file.extension, file.is_directory)}
-                                <span className="font-medium truncate">
-                                  {file.file_name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4 text-xs text-muted-foreground truncate max-w-xs">
-                              {file.file_path}
-                            </td>
-                            <td className="py-3 px-4">
-                              <Badge variant="secondary" className="text-xs">
-                                {file.share_name}
-                              </Badge>
-                            </td>
-                            <td className="py-3 px-4 text-right text-muted-foreground">
-                              {file.is_directory ? "—" : formatFileSize(file.file_size)}
-                            </td>
-                            <td className="py-3 px-4 text-xs text-muted-foreground">
-                              {formatDate(file.modified_at)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Pagination */}
-              {maxPages > 1 && (
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {(currentPage - 1) * pageSize + 1}〜
-                    {Math.min(currentPage * pageSize, totalResults)} / {totalResults.toLocaleString()} 件
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handlePreviousPage}
-                      disabled={!hasPreviousPage}
-                    >
-                      前へ
-                    </Button>
-                    {Array.from({ length: Math.min(maxPages, 5) }, (_, i) => {
-                      const pageNum = currentPage > 3 ? currentPage - 2 + i : i + 1;
-                      if (pageNum > maxPages) return null;
-                      return (
-                        <Button
-                          key={pageNum}
-                          variant={pageNum === currentPage ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => performSearch(searchQuery, pageNum)}
-                        >
-                          {pageNum}
-                        </Button>
-                      );
-                    })}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleNextPage}
-                      disabled={!hasNextPage}
-                    >
-                      次へ
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : searchQuery ? (
-            <Card>
-              <CardContent className="pt-6 text-center text-muted-foreground">
-                検索結果がありません
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="pt-6 text-center text-muted-foreground">
-                検索キーワードを入力してください
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* Browse Tab */}
-        <TabsContent value="browse">
-          <div className="space-y-4">
-            {/* Share List for Browsing */}
-            {!browseShare ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">共有フォルダを選択</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-3">
-                    {shares.map((share) => (
-                      <button
-                        key={share}
-                        onClick={() => handleBrowse(share)}
-                        className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted transition-colors text-left"
-                      >
-                        <Folder className="h-5 w-5 text-blue-400 flex-shrink-0" />
-                        <div>
-                          <div className="font-medium">{share}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {stats?.shareStats.find((s) => s.share_name === share)
-                              ?.total_entries.toLocaleString() || 0}{" "}
-                             件
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 ml-auto text-muted-foreground" />
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">フォルダを閲覧</CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setBrowseShare("");
-                        setBrowseRoot([]);
-                        setBreadcrumbs([]);
-                      }}
-                    >
-                      戻る
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Breadcrumb */}
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    {breadcrumbs.map((crumb, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        {idx > 0 && <ChevronRight className="h-3 w-3" />}
-                        <button
-                          onClick={() => {
-                            setBrowsePath(crumb.path);
-                            setBreadcrumbs(breadcrumbs.slice(0, idx + 1));
-                          }}
-                          className="hover:text-foreground transition-colors"
-                        >
-                          {crumb.name === browseShare ? "ルート" : crumb.name}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Directory Tree */}
-                  <div className="space-y-1 max-h-96 overflow-y-auto">
-                    {browseRoot.length > 0 ? (
-                      browseRoot.map((node) => (
-                        <DirectoryItem
-                          key={node.path}
-                          node={node}
-                          share={browseShare}
-                          onNavigate={(path, name) => {
-                            setBrowsePath(path);
-                            setBreadcrumbs([
-                              ...breadcrumbs,
-                              { name, path },
-                            ]);
-                          }}
-                        />
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        フォルダが空です
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+            {searchTotal > searchResults.length && (
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                {searchTotal.toLocaleString()} 件中 {searchResults.length} 件を表示しています。AIに「もっと表示して」と依頼できます。
+              </p>
             )}
-          </div>
-        </TabsContent>
-      </Tabs>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Search className="h-7 w-7 text-primary/60" />
+              </div>
+              <div className="space-y-2 max-w-md">
+                <p className="text-sm font-medium text-foreground">AIアシスタントに検索を依頼してください</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  右のチャットパネルから「○○に関するファイルを探して」と話しかけると、
+                  共有フォルダ内を検索して結果をここに表示します。
+                  ファイルの内容を要約したり、特定の拡張子で絞り込むこともできます。
+                </p>
+                <div className="flex flex-wrap justify-center gap-2 pt-2">
+                  <Badge variant="secondary" className="text-xs">「議事録を探して」</Badge>
+                  <Badge variant="secondary" className="text-xs">「Excelファイルを検索」</Badge>
+                  <Badge variant="secondary" className="text-xs">「技術グループの資料」</Badge>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Panel */}
       {stats && (
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-          {/* Total Indexed */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                インデックス済みエントリ
-              </CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">インデックス済みエントリ</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {stats.totalIndexed.toLocaleString()}
-              </div>
+              <div className="text-2xl font-bold">{stats.totalIndexed.toLocaleString()}</div>
             </CardContent>
           </Card>
-
-          {/* Top Extension */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                最多拡張子
-              </CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">最多拡張子</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {stats.topExtensions[0]?.extension || "—"}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stats.topExtensions[0]?.count.toLocaleString() || 0} 件
-              </p>
+              <div className="text-2xl font-bold">{stats.topExtensions[0]?.extension || "—"}</div>
+              <p className="text-xs text-muted-foreground mt-1">{stats.topExtensions[0]?.count.toLocaleString() || 0} 件</p>
             </CardContent>
           </Card>
-
-          {/* Share Count */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                共有フォルダ
-              </CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">共有フォルダ</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{shares.length}</div>
             </CardContent>
           </Card>
-
-          {/* Last Scan */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                最終スキャン
-              </CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">最終スキャン</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-sm font-mono">
@@ -1026,42 +733,21 @@ export default function Server02Page() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    <th className="text-left py-3 px-4 font-semibold text-foreground">
-                      共有フォルダ
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-foreground">
-                      ファイル数
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-foreground">
-                      フォルダ数
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-foreground">
-                      合計サイズ
-                    </th>
-                    <th className="text-left py-3 px-4 font-semibold text-foreground">
-                      最終更新
-                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">共有フォルダ</th>
+                    <th className="text-right py-3 px-4 font-semibold text-foreground">ファイル数</th>
+                    <th className="text-right py-3 px-4 font-semibold text-foreground">フォルダ数</th>
+                    <th className="text-right py-3 px-4 font-semibold text-foreground">合計サイズ</th>
+                    <th className="text-left py-3 px-4 font-semibold text-foreground">最終更新</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.shareStats.map((s) => (
-                    <tr
-                      key={s.share_name}
-                      className="border-b border-border/50 hover:bg-muted/50 transition-colors"
-                    >
+                    <tr key={s.share_name} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
                       <td className="py-3 px-4 font-medium">{s.share_name}</td>
-                      <td className="py-3 px-4 text-right text-muted-foreground">
-                        {s.file_count.toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 text-right text-muted-foreground">
-                        {s.dir_count.toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 text-right text-muted-foreground">
-                        {formatFileSize(s.total_size)}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-muted-foreground">
-                        {formatDate(s.last_indexed)}
-                      </td>
+                      <td className="py-3 px-4 text-right text-muted-foreground">{s.file_count.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-muted-foreground">{s.dir_count.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-muted-foreground">{formatFileSize(s.total_size)}</td>
+                      <td className="py-3 px-4 text-xs text-muted-foreground">{formatDate(s.last_indexed)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1069,93 +755,6 @@ export default function Server02Page() {
             </div>
           </CardContent>
         </Card>
-      )}
-    </div>
-  );
-}
-
-// Directory Tree Item Component
-function DirectoryItem({
-  node,
-  share,
-  onNavigate,
-}: {
-  node: DirectoryTreeNode;
-  share: string;
-  onNavigate: (path: string, name: string) => void;
-}) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [children, setChildren] = useState<DirectoryTreeNode[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const loadChildren = async () => {
-    if (isLoading || children.length > 0) return;
-    setIsLoading(true);
-
-    try {
-      const params = new URLSearchParams();
-      params.set("share", share);
-      params.set("path", node.path);
-
-      const response = await fetch(`/api/server02/browse?${params}`);
-      const data = await response.json();
-
-      if (data.files && Array.isArray(data.files)) {
-        const items: DirectoryTreeNode[] = data.files.map((f: FileEntry) => ({
-          name: f.file_name,
-          path: f.file_path,
-          isDirectory: f.is_directory,
-          children: f.is_directory ? [] : undefined,
-          isExpanded: false,
-        }));
-        setChildren(items);
-      }
-    } catch (error) {
-      console.error("Failed to load directory:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleToggle = async () => {
-    if (node.isDirectory) {
-      if (!isExpanded) {
-        await loadChildren();
-      }
-      setIsExpanded(!isExpanded);
-    }
-  };
-
-  if (!node.isDirectory) {
-    return (
-      <div className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted rounded transition-colors">
-        {getFileIcon(node.name.split(".").pop() || null, false)}
-        <span className="truncate">{node.name}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <button
-        onClick={handleToggle}
-        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm hover:bg-muted rounded transition-colors text-left"
-      >
-        {isExpanded ? (
-          <ChevronDown className="h-4 w-4 flex-shrink-0" />
-        ) : (
-          <ChevronRight className="h-4 w-4 flex-shrink-0" />
-        )}
-        <Folder className="h-4 w-4 text-blue-400 flex-shrink-0" />
-        <span className="truncate">{node.name}</span>
-        {isLoading && <span className="text-xs text-muted-foreground ml-auto">読込中...</span>}
-      </button>
-      {isExpanded && (
-        <div className="ml-4 border-l border-border/50">
-          {children.map((child) => (
-            <DirectoryItem key={child.path} node={child} share={share} onNavigate={onNavigate} />
-          ))}
-        </div>
       )}
     </div>
   );

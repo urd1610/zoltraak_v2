@@ -12,6 +12,14 @@ import { Send, Square } from "lucide-react";
 
 const SSE_EVENT_SEPARATOR = /\r?\n\r?\n/;
 
+// Actions that should update the main page display (trigger loading animation & result storage)
+const PAGE_UPDATE_ACTIONS = new Set([
+  "server02_search",
+  "schedule_add", "schedule_update", "schedule_delete",
+  "gantt_add_project", "gantt_update_project", "gantt_delete_project",
+  "gantt_add_task", "gantt_update_task", "gantt_delete_task",
+]);
+
 function getSseEventData(rawEvent: string) {
   const dataLines = rawEvent
     .split(/\r?\n/)
@@ -43,7 +51,7 @@ export function ChatInput() {
     setError,
   } = useChatStore();
 
-  const { currentPage, pageDescription, pageData, availableActions, triggerRefresh } =
+  const { currentPage, pageDescription, pageData, availableActions, triggerRefresh, setActionResults, setIsExecutingActions } =
     usePageContextStore();
 
   const sendMessage = useCallback(async () => {
@@ -161,18 +169,36 @@ export function ChatInput() {
         return;
       }
 
-      finalizeStream(selectedModel, selectedProvider);
+      // Check for action blocks in streaming content BEFORE finalizing
+      // so we can set isExecutingActions=true without a gap
+      const streamContent = useChatStore.getState().streamingContent;
+      const actionCalls = parseActions(streamContent);
+      console.log("[AI Action] Parsed actions from stream:", actionCalls.length, actionCalls);
+      const hasPageUpdateAction = actionCalls.some((c) => PAGE_UPDATE_ACTIONS.has(c.action));
 
-      // After stream finalized, check for action blocks in the completed content
-      const finalContent = useChatStore.getState().messages.at(-1)?.content ?? "";
-      const actionCalls = parseActions(finalContent);
+      if (hasPageUpdateAction) {
+        setIsExecutingActions(true);
+      }
+
+      finalizeStream(selectedModel, selectedProvider);
 
       if (actionCalls.length > 0) {
         const results: ActionResult[] = [];
         for (const call of actionCalls) {
+          console.log("[AI Action] Executing:", call.action, call.params);
           const result = await executeAction(call);
+          console.log("[AI Action] Result:", result.action, result.success, result.message, result.data ? "has data" : "no data");
           results.push(result);
         }
+
+        // Only update page display for actions that produce visual results
+        // (e.g. search results). Read/browse actions stay in chat only.
+        const pageResults = results.filter((r) => PAGE_UPDATE_ACTIONS.has(r.action));
+        if (pageResults.length > 0) {
+          console.log("[AI Action] Storing page results:", pageResults.length);
+          setActionResults(pageResults);
+        }
+        setIsExecutingActions(false);
 
         // Add action result message
         const resultLines = results.map((r) =>
@@ -200,8 +226,10 @@ export function ChatInput() {
       }
     } finally {
       abortRef.current = null;
+      // Always clear executing state on completion/error
+      setIsExecutingActions(false);
     }
-  }, [input, isStreaming, messages, selectedModel, selectedProvider, currentPage, pageDescription, pageData, availableActions, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError, triggerRefresh]);
+  }, [input, isStreaming, messages, selectedModel, selectedProvider, currentPage, pageDescription, pageData, availableActions, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError, triggerRefresh, setActionResults, setIsExecutingActions]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();

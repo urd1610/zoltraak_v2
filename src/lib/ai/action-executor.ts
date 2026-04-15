@@ -199,6 +199,55 @@ export async function executeAction(call: ActionCall): Promise<ActionResult> {
         return { action: call.action, success: true, message: "タスクを削除しました" };
       }
 
+      // ── Server02 Actions ──
+      case "server02_search": {
+        const err = validateRequired(call.params, ["q"]);
+        if (err) throw new Error(err);
+
+        const qs = new URLSearchParams();
+        qs.set("q", String(call.params.q));
+        if (call.params.share) qs.set("share", String(call.params.share));
+        if (call.params.ext) qs.set("ext", String(call.params.ext));
+        if (call.params.type) qs.set("type", String(call.params.type));
+        qs.set("limit", String(call.params.limit || 20));
+
+        const res = await fetch(`/api/server02/search?${qs}`);
+        if (!res.ok) throw new Error("検索に失敗しました");
+        const data = await res.json();
+        return { action: call.action, success: true, message: `${data.total}件のファイルが見つかりました`, data };
+      }
+
+      case "server02_browse": {
+        const err = validateRequired(call.params, ["share"]);
+        if (err) throw new Error(err);
+
+        const qs = new URLSearchParams();
+        qs.set("share", String(call.params.share));
+        if (call.params.path) qs.set("path", String(call.params.path));
+
+        const res = await fetch(`/api/server02/browse?${qs}`);
+        if (!res.ok) throw new Error("フォルダの参照に失敗しました");
+        const data = await res.json();
+        const count = data.files?.length || 0;
+        return { action: call.action, success: true, message: `${count}件のエントリを取得しました`, data };
+      }
+
+      case "server02_read_file": {
+        const err = validateRequired(call.params, ["file_path"]);
+        if (err) throw new Error(err);
+
+        const qs = new URLSearchParams();
+        qs.set("path", String(call.params.file_path));
+
+        const res = await fetch(`/api/server02/read?${qs}`);
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.error || "ファイルの読み取りに失敗しました");
+        }
+        const data = await res.json();
+        return { action: call.action, success: true, message: "ファイル内容を取得しました", data };
+      }
+
       default:
         return { action: call.action, success: false, message: `不明なアクション: ${call.action}` };
     }

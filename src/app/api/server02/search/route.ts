@@ -17,8 +17,11 @@ export async function GET(req: NextRequest) {
     const params: (string | number)[] = [];
 
     if (query) {
-      where += " AND (MATCH(file_name) AGAINST(? IN BOOLEAN MODE) OR MATCH(file_path) AGAINST(? IN BOOLEAN MODE))";
-      params.push(query, query);
+      const keywords = query.split(/\s+/).filter(Boolean);
+      for (const kw of keywords) {
+        where += " AND (file_name LIKE ? OR file_path LIKE ?)";
+        params.push(`%${kw}%`, `%${kw}%`);
+      }
     }
     if (share) {
       where += " AND share_name = ?";
