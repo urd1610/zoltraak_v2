@@ -130,14 +130,39 @@ async function extractPptx(buffer: Buffer): Promise<string> {
   return sorted.map(([name, xml], i) => `--- スライド ${i + 1} ---\n${stripXmlTags(xml)}`).join("\n\n");
 }
 
+/**
+ * Convert a Windows UNC path (\\192.168.0.153\share\path) to macOS mount path (/Volumes/share/path).
+ * Also handles forward-slash variants (//192.168.0.153/share/path) and smb:// URLs.
+ */
+function normalizeToMacPath(rawPath: string): string {
+  // First normalize all backslashes to forward slashes
+  const normalized = rawPath.trim().replace(/\\/g, "/");
+
+  // Already a /Volumes/ path
+  if (normalized.startsWith("/Volumes/")) return normalized;
+
+  // UNC: //192.168.0.153/share/... → /Volumes/share/...
+  const uncMatch = normalized.match(/^\/\/[\d.]+\/(.+)$/);
+  if (uncMatch) return `/Volumes/${uncMatch[1]}`;
+
+  // smb://192.168.0.153/share/... → /Volumes/share/...
+  const smbMatch = normalized.match(/^smb:\/\/[^/]+\/(.+)$/);
+  if (smbMatch) return `/Volumes/${smbMatch[1]}`;
+
+  return normalized;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const filePath = url.searchParams.get("path");
+    const rawPath = url.searchParams.get("path");
 
-    if (!filePath) {
+    if (!rawPath) {
       return NextResponse.json({ error: "path パラメータが必要です" }, { status: 400 });
     }
+
+    // Normalize UNC paths (from Windows scanner) to macOS /Volumes/ paths
+    const filePath = normalizeToMacPath(rawPath);
 
     // Security: only allow reading from /Volumes/ (mounted SMB shares)
     if (!filePath.startsWith("/Volumes/")) {
