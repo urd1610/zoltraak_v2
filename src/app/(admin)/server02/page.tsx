@@ -142,58 +142,181 @@ const SearchingOverlay = memo(function SearchingOverlay() {
 });
 
 /** Clipboard copy button with feedback */
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+async function copyText(text: string): Promise<boolean> {
+  if (!text) return false;
 
-  const handleCopy = async () => {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      return true;
     } catch {
-      // fallback
+      // fallback to legacy method below
     }
+  }
+
+  if (typeof document === "undefined") return false;
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const handleCopy = async () => {
+    const success = await copyText(text);
+    if (success) {
+      setCopied(true);
+      setFailed(false);
+      setTimeout(() => setCopied(false), 2000);
+      return;
+    }
+    setFailed(true);
+    setTimeout(() => setFailed(false), 2000);
   };
 
   return (
     <button
       onClick={handleCopy}
+      type="button"
       className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-      title="パスをコピー"
+      title={failed ? "コピーに失敗しました" : "パスをコピー"}
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied
+        ? <Check className="h-3.5 w-3.5 text-green-400" />
+        : failed ? <Copy className="h-3.5 w-3.5 text-red-400" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   );
 }
 
-/** Open file via server API */
-async function openFile(path: string) {
+/** Open path via server API */
+function buildOpenUrls(payload: {
+  openUrl: string;
+  smbOpenUrl?: string;
+  windowsOpenUrl?: string;
+}) {
+  const isWindows = typeof navigator !== "undefined" && /Windows/.test(navigator.platform);
+  const urls = [payload.openUrl];
+
+  if (isWindows && payload.windowsOpenUrl) {
+    urls.unshift(payload.windowsOpenUrl);
+  }
+
+  if (payload.smbOpenUrl) {
+    urls.push(payload.smbOpenUrl);
+  }
+
+  return [...new Set(urls)];
+}
+
+function launchLocalPath(url: string): boolean {
   try {
-    await fetch("/api/server02/open", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, type: "file" }),
-    });
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (opened) {
+      opened.opener = null;
+      return true;
+    }
   } catch {
-    // silent
+    // fallback below
+  }
+
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.style.position = "fixed";
+    anchor.style.left = "-10000px";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    return true;
+  } catch {
+    // fallback below
+  }
+
+  try {
+    window.location.assign(url);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-/** Open containing directory via server API */
-async function openDirectory(path: string) {
-  try {
-    await fetch("/api/server02/open", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, type: "directory" }),
-    });
-  } catch {
-    // silent
+async function openPath(
+  path: string,
+  type: "file" | "directory",
+  getAuthHeaders: () => Record<string, string>,
+) {
+  const baseHeaders = getAuthHeaders();
+  const headers = baseHeaders.Authorization
+    ? baseHeaders
+    : (() => {
+      if (typeof window === "undefined") return baseHeaders;
+      try {
+        const raw = window.localStorage.getItem("app-settings");
+        if (!raw) return baseHeaders;
+        const parsed = JSON.parse(raw) as { state?: { token?: string } };
+        const token = parsed?.state?.token;
+        return token ? { ...baseHeaders, Authorization: `Bearer ${token}` } : baseHeaders;
+      } catch {
+        return baseHeaders;
+      }
+    })();
+
+  const response = await fetch("/api/server02/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ path, type }),
+  });
+
+  const payload = await response.json().catch(() => null) as {
+    success?: boolean;
+    openUrl?: string;
+    smbOpenUrl?: string;
+    windowsOpenUrl?: string;
+    error?: string;
+  } | null;
+
+  if (!response.ok || !payload?.success || !payload.openUrl) {
+    const errorMessage = payload?.error || `Failed to open ${type}`;
+    throw new Error(errorMessage);
+  }
+
+  const urls = buildOpenUrls(payload);
+  const opened = urls.some(launchLocalPath);
+  if (!opened) {
+    throw new Error("ブラウザからパスを起動できませんでした。");
   }
 }
 
 /** File result row with actions */
-const FileResultRow = memo(function FileResultRow({ file }: { file: FileEntry }) {
+const FileResultRow = memo(function FileResultRow(
+  {
+    file,
+    onOpen,
+  }: {
+    file: FileEntry;
+    onOpen: (path: string, type: "file" | "directory") => Promise<void> | void;
+  },
+) {
   return (
     <tr className="border-b border-border/50 hover:bg-muted/50 transition-colors group">
       <td className="py-3 px-4">
@@ -223,7 +346,8 @@ const FileResultRow = memo(function FileResultRow({ file }: { file: FileEntry })
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {!file.is_directory && (
             <button
-              onClick={() => openFile(file.file_path)}
+              type="button"
+              onClick={() => onOpen(file.file_path, "file")}
               className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
               title="ファイルを開く"
             >
@@ -231,7 +355,8 @@ const FileResultRow = memo(function FileResultRow({ file }: { file: FileEntry })
             </button>
           )}
           <button
-            onClick={() => openDirectory(file.file_path)}
+            type="button"
+            onClick={() => onOpen(file.file_path, "directory")}
             className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             title="フォルダを開く"
           >
@@ -303,7 +428,7 @@ const ScanProgressSection = memo(function ScanProgressSection({
 // ── Main Page ──
 
 export default function Server02Page() {
-  const { isLoggedIn, isAdmin, getAuthHeaders } = useSettingsStore();
+  const { isLoggedIn, isAdmin, getAuthHeaders, openLogin } = useSettingsStore();
   const canManageScan = isLoggedIn && isAdmin();
 
   const [stats, setStats] = useState<StatsData | null>(null);
@@ -642,7 +767,26 @@ export default function Server02Page() {
                 </thead>
                 <tbody>
                   {searchResults.map((file) => (
-                    <FileResultRow key={file.id} file={file} />
+                    <FileResultRow
+                      key={file.id}
+                      file={file}
+                      onOpen={async (path, type) => {
+                        try {
+                          await openPath(path, type, getAuthHeaders);
+                        } catch (error) {
+                          const message = error instanceof Error
+                            ? error.message
+                            : "開けませんでした";
+                          if (message.includes("認証が必要です")) {
+                            alert(message);
+                            openLogin();
+                            return;
+                          }
+                          console.error(message);
+                          alert(message);
+                        }
+                      }}
+                    />
                   ))}
                 </tbody>
               </table>

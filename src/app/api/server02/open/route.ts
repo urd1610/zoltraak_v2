@@ -1,16 +1,92 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { getAuthUser } from "@/lib/auth";
 
-const execAsync = promisify(exec);
+const SMB_HOST = "192.168.0.153";
+const ALLOWED_SHARES = new Set([
+  "①　全社",
+  "②　掲示板",
+  "③　生産グループ",
+  "④　技術グループ",
+  "⑤　品質グループ",
+  "⑥　生産管理グループ",
+  "⑧　情報グループ",
+  "スキャナ文書",
+]);
+
+function normalizeServer02Path(rawPath: string): string {
+  const normalized = rawPath.trim().replace(/\\/g, "/");
+
+  if (normalized.startsWith("/Volumes/")) return normalized;
+  if (normalized.startsWith(`//${SMB_HOST}/`)) {
+    return `/Volumes/${normalized.slice((`//${SMB_HOST}/`).length)}`;
+  }
+  if (normalized.startsWith(`smb://${SMB_HOST}/`)) {
+    return `/Volumes/${normalized.slice((`smb://${SMB_HOST}/`).length)}`;
+  }
+  return normalized;
+}
+
+function getShareNameFromPath(path: string): string {
+  const withoutRoot = path.replace(/^\/Volumes\//, "");
+  return withoutRoot.split("/")[0] || "";
+}
+
+function toSmbUrl(path: string): string {
+  const rel = path.replace(/^\/Volumes\//, "");
+  const encoded = rel
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `smb://${SMB_HOST}/${encoded}`;
+}
+
+function toFileUrl(path: string): string {
+  const rel = path.replace(/^\/Volumes\//, "");
+  const encoded = rel
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `file:///Volumes/${encoded}`;
+}
+
+function toWindowsUncPath(path: string): string {
+  const rel = path.replace(/^\/Volumes\//, "");
+  return `\\\\${SMB_HOST}\\${rel.replace(/\//g, "\\")}`;
+}
+
+function toWindowsFileUrl(path: string): string {
+  const rel = path.replace(/^\/Volumes\//, "");
+  const encoded = rel
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `file://${SMB_HOST}/${encoded}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { path, type } = body;
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: "認証が必要です" },
+        { status: 401 },
+      );
+    }
 
-    // Validate input
-    if (!path || typeof path !== "string") {
+    let body: { path?: string; type?: "file" | "directory" };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON body" },
+        { status: 400 },
+      );
+    }
+
+    const { path, type } = body;
+    const safePath = normalizeServer02Path(path || "");
+
+    if (!safePath || typeof safePath !== "string") {
       return NextResponse.json(
         { success: false, error: "Missing or invalid 'path' parameter" },
         { status: 400 }
@@ -25,48 +101,42 @@ export async function POST(request: NextRequest) {
     }
 
     // Security checks
-    if (!path.startsWith("/Volumes/")) {
+    if (!safePath.startsWith("/Volumes/")) {
       return NextResponse.json(
         { success: false, error: "Path must start with '/Volumes/'" },
         { status: 403 }
       );
     }
 
-    if (path.includes("..")) {
+    if (safePath.includes("..")) {
       return NextResponse.json(
         { success: false, error: "Path cannot contain '..'" },
         { status: 403 }
       );
     }
 
-    // Build the command
-    let command: string;
-    if (type === "directory") {
-      command = `open -R "${path}"`;
-    } else {
-      command = `open "${path}"`;
+    const shareName = getShareNameFromPath(safePath);
+    if (!shareName || !ALLOWED_SHARES.has(shareName)) {
+      return NextResponse.json(
+        { success: false, error: "指定された共有フォルダは許可対象外です" },
+        { status: 403 }
+      );
     }
-
-    // Execute the command
-    await execAsync(command);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully opened ${type}: ${path}`,
+      openUrl: toFileUrl(safePath),
+      smbOpenUrl: toSmbUrl(safePath),
+      windowsOpenUrl: toWindowsFileUrl(safePath),
+      windowsUncPath: toWindowsUncPath(safePath),
+      path: safePath,
+      type,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-    // Check for specific error cases
-    if (errorMessage.includes("No such file or directory")) {
-      return NextResponse.json(
-        { success: false, error: "File or directory not found" },
-        { status: 404 }
-      );
-    }
-
     return NextResponse.json(
-      { success: false, error: `Failed to open: ${errorMessage}` },
+      { success: false, error: `Validation failed: ${errorMessage}` },
       { status: 500 }
     );
   }
