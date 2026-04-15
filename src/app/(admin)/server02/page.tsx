@@ -300,7 +300,7 @@ async function openPath(
     throw new Error(errorMessage);
   }
 
-  const urls = buildOpenUrls(payload);
+  const urls = buildOpenUrls({ openUrl: payload.openUrl, smbOpenUrl: payload.smbOpenUrl, windowsOpenUrl: payload.windowsOpenUrl });
   const opened = urls.some(launchLocalPath);
   if (!opened) {
     throw new Error("ブラウザからパスを起動できませんでした。");
@@ -637,7 +637,7 @@ export default function Server02Page() {
       },
       {
         name: "server02_read_file",
-        description: "テキストファイルの内容を読み取ります（512KB以下のテキストファイルのみ）",
+        description: "ファイルの内容を読み取ります。テキスト、Excel（.xlsx/.xls）、PDF（.pdf）、Word（.doc/.docx）に対応しています（5MB以下）",
         parameters: {
           file_path: { type: "string", description: "ファイルのフルパス（/Volumes/共有名/...）", required: true },
         },
