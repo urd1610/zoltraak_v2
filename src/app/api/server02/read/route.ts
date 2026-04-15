@@ -1,5 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, stat } from "fs/promises";
+import { readFile, stat, readdir } from "fs/promises";
+import { execSync } from "child_process";
+
+const SMB_HOST = "192.168.0.153";
+
+/** Ensure the SMB share is mounted before reading a file */
+async function ensureMounted(filePath: string): Promise<void> {
+  // Extract share name from path like /Volumes/①　全社/some/file.txt
+  const parts = filePath.replace("/Volumes/", "").split("/");
+  const shareName = parts[0];
+  if (!shareName) return;
+
+  const mountPath = `/Volumes/${shareName}`;
+  try {
+    await readdir(mountPath);
+    // Already mounted
+  } catch {
+    // Try to mount
+    try {
+      const smbUrl = `smb://guest@${SMB_HOST}/${shareName}`;
+      execSync(`osascript -e 'mount volume "${smbUrl}"'`, { timeout: 30000 });
+      await stat(mountPath);
+    } catch {
+      throw new Error(`共有フォルダ「${shareName}」のマウントに失敗しました`);
+    }
+  }
+}
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -122,6 +148,9 @@ export async function GET(req: NextRequest) {
     if (filePath.includes("..")) {
       return NextResponse.json({ error: "不正なパスです" }, { status: 400 });
     }
+
+    // Ensure the SMB share is mounted
+    await ensureMounted(filePath);
 
     const fileStat = await stat(filePath);
 
