@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Shield, ArrowUp, ArrowDown } from "lucide-react";
 import {
   Sheet,
@@ -39,6 +39,28 @@ type OrderedNavItem = {
   sort_order: number;
   defaultOrder: number;
 };
+
+function buildOrderedNavItems(
+  navSettings: Array<{ nav_href: string; sort_order?: number | null }>
+) {
+  return allNavItems
+    .map((item, index) => {
+      const setting = navSettings.find((s) => s.nav_href === item.href);
+      return {
+        label: item.label,
+        href: item.href,
+        sort_order:
+          typeof setting?.sort_order === "number" ? setting.sort_order : index,
+        defaultOrder: index,
+      };
+    })
+    .sort((a, b) => {
+      if (a.sort_order === b.sort_order) {
+        return a.defaultOrder - b.defaultOrder;
+      }
+      return a.sort_order - b.sort_order;
+    });
+}
 
 function Toggle({
   active,
@@ -96,35 +118,16 @@ export function SettingsDialog() {
 
   const canEdit = isLoggedIn && isEditorOrAdmin();
   const canToggleAdminOnly = isLoggedIn && isAdmin();
-  const [orderedNavItems, setOrderedNavItems] = useState<OrderedNavItem[]>([]);
+  const orderedNavItems = useMemo(
+    () => buildOrderedNavItems(navSettings),
+    [navSettings]
+  );
 
   useEffect(() => {
     if (isSettingsOpen) {
       fetchNavSettings();
     }
   }, [isSettingsOpen, fetchNavSettings]);
-
-  useEffect(() => {
-    const ordered = allNavItems
-      .map((item, index) => {
-        const setting = navSettings.find((s) => s.nav_href === item.href);
-        return {
-          label: item.label,
-          href: item.href,
-          sort_order:
-            typeof setting?.sort_order === "number" ? setting.sort_order : index,
-          defaultOrder: index,
-        };
-      })
-      .sort((a, b) => {
-        if (a.sort_order === b.sort_order) {
-          return a.defaultOrder - b.defaultOrder;
-        }
-        return a.sort_order - b.sort_order;
-      });
-
-    setOrderedNavItems(ordered);
-  }, [navSettings]);
 
   const handleToggleHidden = async (nav_href: string, currentIsHidden: boolean) => {
     const headers = { "Content-Type": "application/json", ...getAuthHeaders() };
@@ -179,7 +182,6 @@ export function SettingsDialog() {
 
     const next = [...orderedNavItems];
     [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-    setOrderedNavItems(next);
     await persistNavOrder(next);
   };
 

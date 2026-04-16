@@ -337,6 +337,23 @@ interface TaskDialogProps {
   isLoading: boolean;
 }
 
+function createNewTaskFormData(task?: Task): Partial<Task> {
+  if (task) {
+    return task;
+  }
+
+  return {
+    name: "",
+    start_date: dateToString(new Date()),
+    end_date: dateToString(new Date()),
+    progress: 0,
+    color: "blue",
+    assignee: "",
+    description: "",
+    status: "not_started",
+  };
+}
+
 function TaskDialog({
   isOpen,
   onClose,
@@ -344,24 +361,9 @@ function TaskDialog({
   task,
   isLoading,
 }: TaskDialogProps) {
-  const [formData, setFormData] = useState<Partial<Task>>(
-    task || {
-      name: "",
-      start_date: dateToString(new Date()),
-      end_date: dateToString(new Date()),
-      progress: 0,
-      color: "blue",
-      assignee: "",
-      description: "",
-      status: "not_started",
-    }
+  const [formData, setFormData] = useState<Partial<Task>>(() =>
+    createNewTaskFormData(task)
   );
-
-  useEffect(() => {
-    if (task) {
-      setFormData(task);
-    }
-  }, [task]);
 
   const handleSubmit = () => {
     if (
@@ -371,16 +373,7 @@ function TaskDialog({
     ) {
       onSubmit(formData);
       if (!task) {
-        setFormData({
-          name: "",
-          start_date: dateToString(new Date()),
-          end_date: dateToString(new Date()),
-          progress: 0,
-          color: "blue",
-          assignee: "",
-          description: "",
-          status: "not_started",
-        });
+        setFormData(createNewTaskFormData());
       }
     }
   };
@@ -1559,6 +1552,7 @@ export default function GanttPage() {
       />
 
       <TaskDialog
+        key={`task-dialog-${showTaskDialog ? (selectedTask?.id ?? "new") : "closed"}`}
         isOpen={showTaskDialog}
         onClose={() => {
           setShowTaskDialog(false);

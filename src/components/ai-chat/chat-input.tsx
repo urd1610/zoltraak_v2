@@ -5,12 +5,14 @@ import { useChatStore } from "@/stores/chat-store";
 import { usePageContextStore } from "@/stores/page-context-store";
 import { createId, cn } from "@/lib/utils";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
-import { parseActions, executeAction, stripActionBlocks } from "@/lib/ai/action-executor";
+import { parseActions, executeAction } from "@/lib/ai/action-executor";
 import type { ActionResult } from "@/lib/ai/action-executor";
-import type { ChatCompletionChunk } from "@/types/ai";
+import type { ChatCompletionChunk, ChatMessage, ProviderId } from "@/types/ai";
 import { Send, Square } from "lucide-react";
 
 const SSE_EVENT_SEPARATOR = /\r?\n\r?\n/;
+const MAX_AUTO_ACTION_ROUNDS = 3;
+const MAX_ACTION_RESULT_TEXT = 24000;
 
 // Actions that should update the main page display (trigger loading animation & result storage)
 const PAGE_UPDATE_ACTIONS = new Set([
@@ -31,6 +33,182 @@ function getSseEventData(rawEvent: string) {
   }
 
   return dataLines.join("\n").trim();
+}
+
+type ConversationMessage = Pick<ChatMessage, "role" | "content">;
+
+function extractActionBlocks(content: string): string {
+  const matches = content.match(/```action\s*\n?[\s\S]*?```/g);
+  return matches?.join("\n\n") ?? content;
+}
+
+function truncateForPrompt(text: string, maxLength = MAX_ACTION_RESULT_TEXT): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}\n\n... (以降省略: 全${text.length.toLocaleString()}文字)`;
+}
+
+function stringifyForPrompt(value: unknown): string {
+  try {
+    return truncateForPrompt(JSON.stringify(value, null, 2), 12000);
+  } catch {
+    return "(データの文字列化に失敗しました)";
+  }
+}
+
+function buildActionResultContext(results: ActionResult[]): string {
+  const hasSuccessfulRead = results.some((result) => result.action === "server02_read_file" && result.success);
+  const sections = results.map((result) => {
+    const lines = [
+      `### ${result.action}`,
+      `success: ${result.success}`,
+      `message: ${result.message}`,
+    ];
+
+    if (result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+      const data = result.data as Record<string, unknown>;
+      const { content, ...rest } = data;
+
+      if (Object.keys(rest).length > 0) {
+        lines.push("metadata:");
+        lines.push("```json");
+        lines.push(stringifyForPrompt(rest));
+        lines.push("```");
+      }
+
+      if (typeof content === "string") {
+        lines.push("content:");
+        lines.push("```text");
+        lines.push(truncateForPrompt(content));
+        lines.push("```");
+      } else if (!Object.keys(rest).length) {
+        lines.push("data:");
+        lines.push("```json");
+        lines.push(stringifyForPrompt(result.data));
+        lines.push("```");
+      }
+    } else if (result.data !== undefined) {
+      lines.push("data:");
+      lines.push("```json");
+      lines.push(stringifyForPrompt(result.data));
+      lines.push("```");
+    }
+
+    return lines.join("\n");
+  });
+
+  return [
+    "直前にあなたが要求したアクションを実行しました。以下が結果です。",
+    hasSuccessfulRead
+      ? "server02_read_file が成功しているので、取得済みの content を使って今すぐユーザーへ最終回答してください。"
+      : "結果だけで十分に回答できる場合は、追加アクションを出さずにそのままユーザーへ回答してください。",
+    "UI には既に『ファイル内容を取得しました』等の実行メッセージが表示されています。同じ実行報告だけで終わらせず、回答本文まで返してください。",
+    "情報が不足している場合のみ追加アクションを出してください。",
+    "",
+    sections.join("\n\n"),
+  ].join("\n");
+}
+
+async function streamAssistantResponse({
+  conversationMessages,
+  model,
+  provider,
+  signal,
+  appendStreamChunk,
+  finalizeStream,
+  resetStream,
+}: {
+  conversationMessages: ConversationMessage[];
+  model: string;
+  provider: ProviderId;
+  signal: AbortSignal;
+  appendStreamChunk: (text: string) => void;
+  finalizeStream: (model: string, provider: ProviderId) => void;
+  resetStream: () => void;
+}): Promise<string> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: conversationMessages,
+      model,
+      provider,
+      stream: true,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(err.error || `HTTP ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("AIの応答を読み取れませんでした。");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let collectedContent = "";
+  let streamCompleted = false;
+
+  const processEvent = (rawEvent: string) => {
+    const data = getSseEventData(rawEvent);
+    if (!data) {
+      return false;
+    }
+
+    if (data === "[DONE]") {
+      return true;
+    }
+
+    try {
+      const chunk = JSON.parse(data) as ChatCompletionChunk;
+      const content = chunk.choices?.[0]?.delta?.content;
+      if (content) {
+        collectedContent += content;
+        appendStreamChunk(content);
+      }
+    } catch {
+      // skip malformed chunks
+    }
+
+    return false;
+  };
+
+  while (!streamCompleted) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split(SSE_EVENT_SEPARATOR);
+    buffer = events.pop() ?? "";
+
+    for (const event of events) {
+      if (processEvent(event)) {
+        streamCompleted = true;
+        break;
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (!streamCompleted && buffer.trim()) {
+    const trailingEvents = buffer.split(SSE_EVENT_SEPARATOR);
+    for (const event of trailingEvents) {
+      if (processEvent(event)) {
+        break;
+      }
+    }
+  }
+
+  if (!collectedContent) {
+    resetStream();
+    throw new Error("AIから空の応答が返されました。再度お試しください。");
+  }
+
+  finalizeStream(model, provider);
+  return collectedContent;
 }
 
 export function ChatInput() {
@@ -139,8 +317,6 @@ export function ChatInput() {
     addMessage(userMsg);
     setAttachedFiles([]);
 
-    startStream();
-
     // Build system prompt with page context
     const systemPrompt = buildSystemPrompt(
       currentPage
@@ -148,9 +324,9 @@ export function ChatInput() {
         : null
     );
 
-    const allMessages = [
+    const conversationMessages: ConversationMessage[] = [
       { role: "system" as const, content: systemPrompt },
-      ...[...messages, userMsg].map((m) => ({
+      ...[...messages.filter((message) => !message.isActionResult), userMsg].map((m) => ({
         role: m.role,
         content: m.content,
       })),
@@ -160,100 +336,35 @@ export function ChatInput() {
     abortRef.current = controller;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: allMessages,
+      for (let round = 0; round < MAX_AUTO_ACTION_ROUNDS; round += 1) {
+        startStream();
+        const assistantContent = await streamAssistantResponse({
+          conversationMessages,
           model: selectedModel,
           provider: selectedProvider,
-          stream: true,
-        }),
-        signal: controller.signal,
-      });
+          signal: controller.signal,
+          appendStreamChunk,
+          finalizeStream,
+          resetStream,
+        });
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        throw new Error(err.error || `HTTP ${response.status}`);
-      }
+        const actionCalls = parseActions(assistantContent);
+        console.log("[AI Action] Parsed actions from stream:", actionCalls.length, actionCalls);
 
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let hasAssistantContent = false;
-      let streamCompleted = false;
+        conversationMessages.push({
+          role: "assistant",
+          content: actionCalls.length > 0 ? extractActionBlocks(assistantContent) : assistantContent,
+        });
 
-      const processEvent = (rawEvent: string) => {
-        const data = getSseEventData(rawEvent);
-        if (!data) {
-          return false;
+        if (actionCalls.length === 0) {
+          break;
         }
 
-        if (data === "[DONE]") {
-          return true;
+        const hasPageUpdateAction = actionCalls.some((call) => PAGE_UPDATE_ACTIONS.has(call.action));
+        if (hasPageUpdateAction) {
+          setIsExecutingActions(true);
         }
 
-        try {
-          const chunk = JSON.parse(data) as ChatCompletionChunk;
-          const content = chunk.choices?.[0]?.delta?.content;
-          if (content) {
-            hasAssistantContent = true;
-            appendStreamChunk(content);
-          }
-        } catch {
-          // skip malformed chunks
-        }
-
-        return false;
-      };
-
-      while (!streamCompleted) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(SSE_EVENT_SEPARATOR);
-        buffer = events.pop() ?? "";
-
-        for (const event of events) {
-          if (processEvent(event)) {
-            streamCompleted = true;
-            break;
-          }
-        }
-      }
-
-      buffer += decoder.decode();
-      if (!streamCompleted && buffer.trim()) {
-        const trailingEvents = buffer.split(SSE_EVENT_SEPARATOR);
-        for (const event of trailingEvents) {
-          if (processEvent(event)) {
-            streamCompleted = true;
-            break;
-          }
-        }
-      }
-
-      if (!hasAssistantContent) {
-        resetStream();
-        setError("AIから空の応答が返されました。再度お試しください。");
-        return;
-      }
-
-      // Check for action blocks in streaming content BEFORE finalizing
-      // so we can set isExecutingActions=true without a gap
-      const streamContent = useChatStore.getState().streamingContent;
-      const actionCalls = parseActions(streamContent);
-      console.log("[AI Action] Parsed actions from stream:", actionCalls.length, actionCalls);
-      const hasPageUpdateAction = actionCalls.some((c) => PAGE_UPDATE_ACTIONS.has(c.action));
-
-      if (hasPageUpdateAction) {
-        setIsExecutingActions(true);
-      }
-
-      finalizeStream(selectedModel, selectedProvider);
-
-      if (actionCalls.length > 0) {
         const results: ActionResult[] = [];
         for (const call of actionCalls) {
           console.log("[AI Action] Executing:", call.action, call.params);
@@ -269,7 +380,6 @@ export function ChatInput() {
           console.log("[AI Action] Storing page results:", pageResults.length);
           setActionResults(pageResults);
         }
-        setIsExecutingActions(false);
 
         // Add action result message
         const resultLines = results.map((r) =>
@@ -289,6 +399,13 @@ export function ChatInput() {
 
         // Trigger page data refresh
         triggerRefresh();
+
+        conversationMessages.push({
+          role: "user",
+          content: buildActionResultContext(results),
+        });
+
+        setIsExecutingActions(false);
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -300,7 +417,7 @@ export function ChatInput() {
       // Always clear executing state on completion/error
       setIsExecutingActions(false);
     }
-  }, [input, isStreaming, messages, selectedModel, selectedProvider, currentPage, pageDescription, pageData, availableActions, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError, triggerRefresh, setActionResults, setIsExecutingActions, attachedFiles, mentionableFiles, selectMention, filteredMentions]);
+  }, [input, isStreaming, messages, selectedModel, selectedProvider, currentPage, pageDescription, pageData, availableActions, addMessage, startStream, appendStreamChunk, finalizeStream, resetStream, setError, triggerRefresh, setActionResults, setIsExecutingActions, attachedFiles]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
