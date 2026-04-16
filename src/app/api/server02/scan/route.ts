@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import type { PoolConnection, ResultSetHeader } from "mysql2/promise";
 import { readdir, stat } from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
 import { getAuthUser } from "@/lib/auth";
+import {
+  SERVER02_SHARES,
+  SMB_HOST,
+  getServer02NativeShareRoot,
+} from "@/lib/server02-paths";
 
-const SMB_HOST = "192.168.0.153";
-const SHARES = [
-  { name: "①　全社", mountPath: "/Volumes/①　全社" },
-  { name: "②　掲示板", mountPath: "/Volumes/②　掲示板" },
-  { name: "③　生産グループ", mountPath: "/Volumes/③　生産グループ" },
-  { name: "④　技術グループ", mountPath: "/Volumes/④　技術グループ" },
-  { name: "⑤　品質グループ", mountPath: "/Volumes/⑤　品質グループ" },
-  { name: "⑥　生産管理グループ", mountPath: "/Volumes/⑥　生産管理グループ" },
-  { name: "⑧　情報グループ", mountPath: "/Volumes/⑧　情報グループ" },
-  { name: "スキャナ文書", mountPath: "/Volumes/スキャナ文書" },
-];
+const SHARES = SERVER02_SHARES.map((name) => ({ name }));
 
 const SCAN_CONCURRENCY = 8;
 
@@ -41,15 +37,28 @@ let activeScan: ScanProgress | null = null;
 let cancelRequested = false;
 
 async function mountShare(shareName: string): Promise<boolean> {
-  const mountPath = `/Volumes/${shareName}`;
+  const shareRoot = getServer02NativeShareRoot(shareName);
+  if (!shareRoot) {
+    return false;
+  }
+
+  if (process.platform === "win32") {
+    try {
+      await readdir(shareRoot);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
-    await readdir(mountPath);
+    await readdir(shareRoot);
     return true;
   } catch {
     try {
       const smbUrl = `smb://guest@${SMB_HOST}/${shareName}`;
       execSync(`osascript -e 'mount volume "${smbUrl}"'`, { timeout: 30000 });
-      await stat(mountPath);
+      await stat(shareRoot);
       return true;
     } catch {
       return false;
@@ -132,7 +141,7 @@ async function scanShareFast(
 }
 
 async function bulkInsert(
-  connection: any,
+  connection: PoolConnection,
   files: FileRecord[],
   batchSize = 500,
 ) {
@@ -170,7 +179,7 @@ async function runScanInBackground(
 ) {
   const connection = await pool.getConnection();
   try {
-    const [logResult] = await connection.execute<any>(
+    const [logResult] = await connection.execute<ResultSetHeader>(
       "INSERT INTO server02_scan_logs (share_name, status) VALUES (?, 'running')",
       [targetShare],
     );
@@ -215,6 +224,23 @@ async function runScanInBackground(
     activeScan.currentPhase = "scanning";
     activeScan.message = `${mountedShares.length} 共有フォルダをマウント完了、スキャン開始`;
 
+    if (mountedShares.length === 0) {
+      await connection.execute(
+        "UPDATE server02_scan_logs SET status = 'failed', error_message = ?, total_files = 0, total_directories = 0, total_size = 0, completed_at = NOW() WHERE id = ?",
+        ["アクセス可能な共有フォルダがありません", scanId],
+      );
+
+      activeScan.status = "failed";
+      activeScan.completedAt = new Date().toISOString();
+      activeScan.currentPhase = "error";
+      activeScan.message = "アクセス可能な共有フォルダがありません";
+
+      setTimeout(() => {
+        if (activeScan?.scanId === scanId) activeScan = null;
+      }, 30000);
+      return;
+    }
+
     // Phase 2: 各共有を順次スキャン
     for (let idx = 0; idx < mountedShares.length; idx++) {
       if (cancelRequested) break;
@@ -231,7 +257,13 @@ async function runScanInBackground(
         [share.name],
       );
 
-      const files = await scanShareFast(share.mountPath, share.name, maxDepth);
+      const rootPath = getServer02NativeShareRoot(share.name);
+      if (!rootPath) {
+        activeScan.shareResults.push(`${share.name} — このOSではサポートされていません`);
+        continue;
+      }
+
+      const files = await scanShareFast(rootPath, share.name, maxDepth);
 
       if (cancelRequested) break;
 
@@ -289,7 +321,7 @@ async function runScanInBackground(
         activeScan = null;
       }
     }, 30000);
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (activeScan) {
       activeScan.status = "failed";
       activeScan.currentPhase = "error";
@@ -334,6 +366,10 @@ export async function POST(req: NextRequest) {
   const sharesToScan = targetShare
     ? SHARES.filter((s) => s.name === targetShare)
     : SHARES;
+
+  if (targetShare && sharesToScan.length === 0) {
+    return NextResponse.json({ error: "指定された共有フォルダが見つかりません" }, { status: 400 });
+  }
 
   // バックグラウンドで実行（awaitしない）
   runScanInBackground(sharesToScan, targetShare, maxDepth);
@@ -411,7 +447,7 @@ export async function GET(req: NextRequest) {
     } finally {
       connection.release();
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to get scan stats";
     return NextResponse.json({ error: message }, { status: 500 });

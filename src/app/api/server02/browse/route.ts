@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import {
+  buildServer02FilePath,
+  inferServer02FilePathStyle,
+  parseServer02Path,
+} from "@/lib/server02-paths";
 
 export async function GET(req: NextRequest) {
   try {
@@ -45,21 +50,28 @@ export async function GET(req: NextRequest) {
       // Get breadcrumb path
       let breadcrumbs: { name: string; path: string }[] = [];
       if (parentPath) {
-        const mountPrefix = `/Volumes/${share}`;
-        const relativePath = parentPath.replace(mountPrefix, "");
-        const parts = relativePath.split("/").filter(Boolean);
-        let currentPath = mountPrefix;
-        breadcrumbs = parts.map((part) => {
-          currentPath = `${currentPath}/${part}`;
-          return { name: part, path: currentPath };
-        });
+        const pathParts = parseServer02Path(parentPath);
+        if (pathParts && pathParts.shareName === share) {
+          const style = inferServer02FilePathStyle(parentPath);
+          const currentSegments: string[] = [];
+          breadcrumbs = pathParts.relativeSegments.map((part) => {
+            currentSegments.push(part);
+            return {
+              name: part,
+              path: buildServer02FilePath(
+                { shareName: pathParts.shareName, relativeSegments: [...currentSegments] },
+                style,
+              ),
+            };
+          });
+        }
       }
 
       return NextResponse.json({ files: rows, breadcrumbs });
     } finally {
       connection.release();
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to browse files";
     return NextResponse.json({ error: message }, { status: 500 });

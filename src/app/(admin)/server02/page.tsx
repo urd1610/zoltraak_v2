@@ -598,6 +598,13 @@ export default function Server02Page() {
         if (result.progress) applyProgress(result.progress);
         return;
       }
+      if (!response.ok) {
+        const message = result?.error || "スキャンの開始に失敗しました";
+        if (message.includes("認証が必要です")) {
+          openLogin();
+        }
+        throw new Error(message);
+      }
       setIsScanning(true);
       setScanStartedAt(new Date());
       setScanProgress("スキャンを開始しています...");
@@ -650,7 +657,7 @@ export default function Server02Page() {
         name: "server02_read_file",
         description: "ファイルの内容を読み取ります。テキスト、Excel（.xlsx/.xls）、PDF（.pdf）、Word（.doc/.docx）に対応しています（5MB以下）",
         parameters: {
-          file_path: { type: "string", description: "ファイルのフルパス（/Volumes/共有名/...）", required: true },
+          file_path: { type: "string", description: "検索結果や添付情報で取得したファイルのフルパス", required: true },
         },
       },
     ];

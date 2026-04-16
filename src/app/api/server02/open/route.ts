@@ -1,67 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
-
-const SMB_HOST = "192.168.0.153";
-const ALLOWED_SHARES = new Set([
-  "①　全社",
-  "②　掲示板",
-  "③　生産グループ",
-  "④　技術グループ",
-  "⑤　品質グループ",
-  "⑥　生産管理グループ",
-  "⑧　情報グループ",
-  "スキャナ文書",
-]);
-
-function normalizeServer02Path(rawPath: string): string {
-  const normalized = rawPath.trim().replace(/\\/g, "/");
-
-  if (normalized.startsWith("/Volumes/")) return normalized;
-  if (normalized.startsWith(`//${SMB_HOST}/`)) {
-    return `/Volumes/${normalized.slice((`//${SMB_HOST}/`).length)}`;
-  }
-  if (normalized.startsWith(`smb://${SMB_HOST}/`)) {
-    return `/Volumes/${normalized.slice((`smb://${SMB_HOST}/`).length)}`;
-  }
-  return normalized;
-}
-
-function getShareNameFromPath(path: string): string {
-  const withoutRoot = path.replace(/^\/Volumes\//, "");
-  return withoutRoot.split("/")[0] || "";
-}
-
-function toSmbUrl(path: string): string {
-  const rel = path.replace(/^\/Volumes\//, "");
-  const encoded = rel
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `smb://${SMB_HOST}/${encoded}`;
-}
-
-function toFileUrl(path: string): string {
-  const rel = path.replace(/^\/Volumes\//, "");
-  const encoded = rel
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file:///Volumes/${encoded}`;
-}
-
-function toWindowsUncPath(path: string): string {
-  const rel = path.replace(/^\/Volumes\//, "");
-  return `\\\\${SMB_HOST}\\${rel.replace(/\//g, "\\")}`;
-}
-
-function toWindowsFileUrl(path: string): string {
-  const rel = path.replace(/^\/Volumes\//, "");
-  const encoded = rel
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file://${SMB_HOST}/${encoded}`;
-}
+import {
+  ALLOWED_SERVER02_SHARES,
+  parseServer02Path,
+  toMacFileUrl,
+  toMacServer02Path,
+  toSmbUrl,
+  toWindowsFileUrl,
+  toWindowsServer02Path,
+} from "@/lib/server02-paths";
 
 export async function POST(request: NextRequest) {
   try {
@@ -84,9 +31,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { path, type } = body;
-    const safePath = normalizeServer02Path(path || "");
+    const pathParts = parseServer02Path(path || "");
 
-    if (!safePath || typeof safePath !== "string") {
+    if (!pathParts) {
       return NextResponse.json(
         { success: false, error: "Missing or invalid 'path' parameter" },
         { status: 400 }
@@ -101,22 +48,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Security checks
-    if (!safePath.startsWith("/Volumes/")) {
-      return NextResponse.json(
-        { success: false, error: "Path must start with '/Volumes/'" },
-        { status: 403 }
-      );
-    }
-
-    if (safePath.includes("..")) {
+    if ([pathParts.shareName, ...pathParts.relativeSegments].includes("..")) {
       return NextResponse.json(
         { success: false, error: "Path cannot contain '..'" },
         { status: 403 }
       );
     }
 
-    const shareName = getShareNameFromPath(safePath);
-    if (!shareName || !ALLOWED_SHARES.has(shareName)) {
+    if (!ALLOWED_SERVER02_SHARES.has(pathParts.shareName)) {
       return NextResponse.json(
         { success: false, error: "指定された共有フォルダは許可対象外です" },
         { status: 403 }
@@ -125,11 +64,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      openUrl: toFileUrl(safePath),
-      smbOpenUrl: toSmbUrl(safePath),
-      windowsOpenUrl: toWindowsFileUrl(safePath),
-      windowsUncPath: toWindowsUncPath(safePath),
-      path: safePath,
+      openUrl: toMacFileUrl(pathParts),
+      smbOpenUrl: toSmbUrl(pathParts),
+      windowsOpenUrl: toWindowsFileUrl(pathParts),
+      windowsUncPath: toWindowsServer02Path(pathParts),
+      path: toMacServer02Path(pathParts),
       type,
     });
   } catch (error) {

@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import path from "node:path";
 import { readFile, stat, readdir } from "fs/promises";
 import { execSync } from "child_process";
-
-const SMB_HOST = "192.168.0.153";
+import {
+  ALLOWED_SERVER02_SHARES,
+  SMB_HOST,
+  getServer02NativeShareRoot,
+  hasServer02Traversal,
+  parseServer02Path,
+  toNativeServer02Path,
+} from "@/lib/server02-paths";
 
 /** Ensure the SMB share is mounted before reading a file */
-async function ensureMounted(filePath: string): Promise<void> {
-  // Extract share name from path like /Volumes/①　全社/some/file.txt
-  const parts = filePath.replace("/Volumes/", "").split("/");
-  const shareName = parts[0];
-  if (!shareName) return;
+async function ensureMounted(shareName: string): Promise<void> {
+  if (process.platform !== "darwin") {
+    return;
+  }
 
-  const mountPath = `/Volumes/${shareName}`;
+  const mountPath = getServer02NativeShareRoot(shareName, "darwin");
+  if (!mountPath) {
+    throw new Error("このOSでは共有フォルダのマウントをサポートしていません");
+  }
+
   try {
     await readdir(mountPath);
     // Already mounted
@@ -127,29 +137,7 @@ async function extractPptx(buffer: Buffer): Promise<string> {
   const entries = await extractFromZip(buffer, /^ppt\/slides\/slide\d+\.xml$/);
   const sorted = [...entries.entries()].sort(([a], [b]) => a.localeCompare(b));
   if (sorted.length === 0) return "(PowerPointのテキスト抽出に失敗しました)";
-  return sorted.map(([name, xml], i) => `--- スライド ${i + 1} ---\n${stripXmlTags(xml)}`).join("\n\n");
-}
-
-/**
- * Convert a Windows UNC path (\\192.168.0.153\share\path) to macOS mount path (/Volumes/share/path).
- * Also handles forward-slash variants (//192.168.0.153/share/path) and smb:// URLs.
- */
-function normalizeToMacPath(rawPath: string): string {
-  // First normalize all backslashes to forward slashes
-  const normalized = rawPath.trim().replace(/\\/g, "/");
-
-  // Already a /Volumes/ path
-  if (normalized.startsWith("/Volumes/")) return normalized;
-
-  // UNC: //192.168.0.153/share/... → /Volumes/share/...
-  const uncMatch = normalized.match(/^\/\/[\d.]+\/(.+)$/);
-  if (uncMatch) return `/Volumes/${uncMatch[1]}`;
-
-  // smb://192.168.0.153/share/... → /Volumes/share/...
-  const smbMatch = normalized.match(/^smb:\/\/[^/]+\/(.+)$/);
-  if (smbMatch) return `/Volumes/${smbMatch[1]}`;
-
-  return normalized;
+  return sorted.map(([, xml], i) => `--- スライド ${i + 1} ---\n${stripXmlTags(xml)}`).join("\n\n");
 }
 
 export async function GET(req: NextRequest) {
@@ -161,21 +149,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "path パラメータが必要です" }, { status: 400 });
     }
 
-    // Normalize UNC paths (from Windows scanner) to macOS /Volumes/ paths
-    const filePath = normalizeToMacPath(rawPath);
-
-    // Security: only allow reading from /Volumes/ (mounted SMB shares)
-    if (!filePath.startsWith("/Volumes/")) {
+    const pathParts = parseServer02Path(rawPath);
+    if (!pathParts) {
       return NextResponse.json({ error: "許可されていないパスです" }, { status: 403 });
     }
 
+    if (!ALLOWED_SERVER02_SHARES.has(pathParts.shareName)) {
+      return NextResponse.json({ error: "指定された共有フォルダは許可対象外です" }, { status: 403 });
+    }
+
     // Prevent path traversal
-    if (filePath.includes("..")) {
+    if (hasServer02Traversal(pathParts)) {
       return NextResponse.json({ error: "不正なパスです" }, { status: 400 });
     }
 
+    const filePath = toNativeServer02Path(rawPath);
+    if (!filePath) {
+      return NextResponse.json(
+        { error: "このOSでは server02 のファイル読み取りをサポートしていません" },
+        { status: 501 },
+      );
+    }
+
     // Ensure the SMB share is mounted
-    await ensureMounted(filePath);
+    await ensureMounted(pathParts.shareName);
 
     const fileStat = await stat(filePath);
 
@@ -230,7 +227,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       path: filePath,
-      file_name: filePath.split("/").pop(),
+      file_name: path.basename(filePath),
       extension: ext,
       format,
       size: fileStat.size,
