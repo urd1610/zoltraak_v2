@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
     } finally {
       connection.release();
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to search files";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -31,6 +31,10 @@ interface ProjectWithTasks extends GanttProjectRow {
   tasks: GanttTaskRow[];
 }
 
+interface MaxSortOrderRow extends RowDataPacket {
+  max_order: number | null;
+}
+
 function formatDate(date: Date | string): string {
   if (typeof date === "string") {
     // If already a string, try to extract just the date part (YYYY-MM-DD)
@@ -131,7 +135,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Get max sort_order
-        const [maxSort] = await connection.execute<any[]>(
+        const [maxSort] = await connection.execute<MaxSortOrderRow[]>(
           "SELECT MAX(sort_order) as max_order FROM gantt_projects"
         );
         const nextSortOrder =
@@ -180,7 +184,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Get max sort_order for this project
-        const [maxSort] = await connection.execute<any[]>(
+        const [maxSort] = await connection.execute<MaxSortOrderRow[]>(
           "SELECT MAX(sort_order) as max_order FROM gantt_tasks WHERE project_id = ?",
           [project_id]
         );
