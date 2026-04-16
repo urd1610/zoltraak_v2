@@ -1,0 +1,25 @@
+
+> zoltraak-init@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.110.202.208:3000
+✓ Ready in 2.3s
+
+ GET / 307 in 3.4s (next.js: 3.2s, application-code: 222ms)
+ GET /dashboard 200 in 1848ms (next.js: 1602ms, application-code: 246ms)
+ GET / 307 in 52ms (next.js: 8ms, application-code: 44ms)
+ GET /dashboard 200 in 84ms (next.js: 8ms, application-code: 77ms)
+ GET / 307 in 54ms (next.js: 7ms, application-code: 47ms)
+ GET /dashboard 200 in 78ms (next.js: 5ms, application-code: 73ms)
+ GET / 307 in 123ms (next.js: 6ms, application-code: 117ms)
+ GET /dashboard 200 in 85ms (next.js: 5ms, application-code: 80ms)
+ GET / 307 in 62ms (next.js: 8ms, application-code: 54ms)
+ GET /dashboard 200 in 105ms (next.js: 7ms, application-code: 99ms)
+ GET /dashboard 200 in 73ms (next.js: 6ms, application-code: 67ms)
+ GET / 307 in 160ms (next.js: 7ms, application-code: 153ms)
+ GET /dashboard 200 in 109ms (next.js: 8ms, application-code: 101ms)
+ GET /api/models?provider=openrouter 200 in 701ms (next.js: 387ms, application-code: 314ms)
+ GET /api/nav-visibility 200 in 738ms (next.js: 624ms, application-code: 115ms)
+ GET /api/nav-visibility 200 in 48ms (next.js: 5ms, application-code: 43ms)
