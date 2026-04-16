@@ -56,11 +56,15 @@ const BINARY_EXTENSIONS = new Set([
 
 const ALL_SUPPORTED = new Set([...TEXT_EXTENSIONS, ...BINARY_EXTENSIONS]);
 
+function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
+}
+
 // ── PDF extraction ──
 async function extractPdf(buffer: Buffer): Promise<string> {
-  // pdf-parse v1 exports a function directly
+  // Import the parser directly to avoid pdf-parse's package entry running its debug bootstrap.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
+  const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
   const result = await pdfParse(buffer);
   return result.text;
 }
@@ -174,7 +178,15 @@ export async function GET(req: NextRequest) {
     // Ensure the SMB share is mounted
     await ensureMounted(pathParts.shareName);
 
-    const fileStat = await stat(filePath);
+    let fileStat: Awaited<ReturnType<typeof stat>>;
+    try {
+      fileStat = await stat(filePath);
+    } catch (error: unknown) {
+      if (isErrnoException(error, "ENOENT")) {
+        return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
+      }
+      throw error;
+    }
 
     if (fileStat.isDirectory()) {
       return NextResponse.json({ error: "ディレクトリは読み取れません" }, { status: 400 });
@@ -196,12 +208,25 @@ export async function GET(req: NextRequest) {
       }, { status: 415 });
     }
 
-    const buffer = await readFile(filePath);
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(filePath);
+    } catch (error: unknown) {
+      if (isErrnoException(error, "ENOENT")) {
+        return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
+      }
+      throw error;
+    }
+
     let content: string;
     let format: string;
 
     if (ext === "pdf") {
-      content = await extractPdf(buffer);
+      try {
+        content = await extractPdf(buffer);
+      } catch {
+        throw new Error("PDF の読み取りに失敗しました");
+      }
       format = "pdf-text";
     } else if (ext === "xlsx" || ext === "xls") {
       content = await extractExcel(buffer);
@@ -235,9 +260,6 @@ export async function GET(req: NextRequest) {
       truncated,
     });
   } catch (error: unknown) {
-    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
-    }
     const message = error instanceof Error ? error.message : "ファイルの読み取りに失敗しました";
     return NextResponse.json({ error: message }, { status: 500 });
   }
